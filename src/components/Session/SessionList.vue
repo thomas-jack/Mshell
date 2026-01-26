@@ -65,7 +65,9 @@
               </div>
               
               <div class="session-content">
-                <div class="session-name">{{ session.name }}</div>
+                <div class="session-name-row">
+                  <span class="session-name">{{ session.name }}</span>
+                </div>
                 <div class="session-details">
                   <span class="detail-item">
                     <el-icon :size="12"><User /></el-icon>
@@ -77,28 +79,42 @@
                     {{ session.host }}
                   </span>
                 </div>
+              </div>
+              
+              <div class="session-actions-wrapper">
                 <!-- 到期信息 -->
-                <div v-if="session.expiryDate" class="session-expiry">
+                <div v-if="session.expiryDate" class="expiry-info">
                   <el-tag 
                     :type="getExpiryTagType(session.expiryDate)" 
                     size="small"
                     effect="plain"
+                    class="expiry-tag"
                   >
                     {{ getExpiryText(session.expiryDate) }}
                   </el-tag>
                 </div>
-              </div>
-              
-              <div class="session-actions">
-                <el-tooltip content="编辑" placement="top">
-                  <el-button 
-                    :icon="Edit" 
-                    text 
-                    circle 
-                    size="small"
-                    @click.stop="handleEdit(session)"
-                  />
-                </el-tooltip>
+                
+                <div class="session-actions">
+                  <el-tooltip content="编辑" placement="top">
+                    <el-button 
+                      :icon="Edit" 
+                      text 
+                      circle 
+                      size="small"
+                      @click.stop="handleEdit(session)"
+                    />
+                  </el-tooltip>
+                  <el-tooltip content="删除" placement="top">
+                    <el-button 
+                      :icon="Delete" 
+                      text 
+                      circle 
+                      size="small"
+                      type="danger"
+                      @click.stop="handleDelete(session)"
+                    />
+                  </el-tooltip>
+                </div>
               </div>
             </div>
           </div>
@@ -137,7 +153,9 @@
               </div>
               
               <div class="session-content">
-                <div class="session-name">{{ session.name }}</div>
+                <div class="session-name-row">
+                  <span class="session-name">{{ session.name }}</span>
+                </div>
                 <div class="session-details">
                   <span class="detail-item">
                     <el-icon :size="12"><User /></el-icon>
@@ -149,28 +167,42 @@
                     {{ session.host }}
                   </span>
                 </div>
+              </div>
+              
+              <div class="session-actions-wrapper">
                 <!-- 到期信息 -->
-                <div v-if="session.expiryDate" class="session-expiry">
+                <div v-if="session.expiryDate" class="expiry-info">
                   <el-tag 
                     :type="getExpiryTagType(session.expiryDate)" 
                     size="small"
                     effect="plain"
+                    class="expiry-tag"
                   >
                     {{ getExpiryText(session.expiryDate) }}
                   </el-tag>
                 </div>
-              </div>
-              
-              <div class="session-actions">
-                <el-tooltip content="编辑" placement="top">
-                  <el-button 
-                    :icon="Edit" 
-                    text 
-                    circle 
-                    size="small"
-                    @click.stop="handleEdit(session)"
-                  />
-                </el-tooltip>
+                
+                <div class="session-actions">
+                  <el-tooltip content="编辑" placement="top">
+                    <el-button 
+                      :icon="Edit" 
+                      text 
+                      circle 
+                      size="small"
+                      @click.stop="handleEdit(session)"
+                    />
+                  </el-tooltip>
+                  <el-tooltip content="删除" placement="top">
+                    <el-button 
+                      :icon="Delete" 
+                      text 
+                      circle 
+                      size="small"
+                      type="danger"
+                      @click.stop="handleDelete(session)"
+                    />
+                  </el-tooltip>
+                </div>
               </div>
             </div>
           </div>
@@ -242,7 +274,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { 
-  Search, Connection, Edit, FolderAdd, Folder, Files, User, Monitor 
+  Search, Connection, Edit, Delete, FolderAdd, Folder, Files, User, Monitor 
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { SessionConfig, SessionGroup } from '@/types/session'
@@ -312,6 +344,33 @@ const handleSessionClick = (session: SessionConfig) => {
 
 const handleEdit = (session: SessionConfig) => {
   emit('edit', session)
+}
+
+const handleDelete = async (session: SessionConfig) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除会话 "${session.name}" 吗？此操作不可恢复。`,
+      '确认删除',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消'
+      }
+    )
+
+    const result = await window.electronAPI.session.delete(session.id)
+    if (result.success) {
+      ElMessage.success('会话已删除')
+      // 重新加载会话列表
+      emit('refresh')
+    } else {
+      ElMessage.error(`删除失败: ${result.error}`)
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(`删除失败: ${error.message}`)
+    }
+  }
 }
 
 const handleContextMenu = (session: SessionConfig, event: MouseEvent) => {
@@ -627,15 +686,45 @@ const handleRenameGroup = () => {
   gap: 2px; /* 减小间距 */
 }
 
+/* 会话名称行 */
+.session-name-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
 .session-name {
-  font-size: 13px; /* 减小字号 */
+  font-size: 13px;
   color: var(--text-primary);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   letter-spacing: -0.2px;
-  line-height: 1.3; /* 减小行高 */
+  line-height: 1.3;
+}
+
+/* 操作区域包装器 */
+.session-actions-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+/* 到期信息 */
+.expiry-info {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.expiry-tag {
+  flex-shrink: 0;
+  font-size: 10px !important;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 6px;
 }
 
 .session-details {
@@ -657,27 +746,13 @@ const handleRenameGroup = () => {
   color: var(--text-disabled);
 }
 
-/* 到期信息 */
-.session-expiry {
-  margin-top: 4px;
-}
-
-.session-expiry :deep(.el-tag) {
-  font-size: 10px;
-  height: 18px;
-  line-height: 18px;
-  padding: 0 6px;
-}
-
-
 /* 会话操作 */
 .session-actions {
   display: flex;
   align-items: center;
-  gap: 2px; /* 减小间距 */
+  gap: 2px;
   opacity: 0;
   transition: opacity var(--transition-fast);
-  margin-left: 8px; /* 减小间距 */
 }
 
 .session-card:hover .session-actions {

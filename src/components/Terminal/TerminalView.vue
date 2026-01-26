@@ -66,7 +66,9 @@ onMounted(() => {
     cursorStyle: props.options.cursorStyle,
     cursorBlink: props.options.cursorBlink,
     scrollback: props.options.scrollback,
-    theme: theme
+    theme: theme,
+    allowProposedApi: true,
+    convertEol: true
   })
 
   // Load addons

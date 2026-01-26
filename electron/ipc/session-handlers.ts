@@ -27,8 +27,13 @@ export function registerSessionHandlers() {
   })
 
   ipcMain.handle('session:delete', async (_event, id: string) => {
-    await sessionManager.initialize()
-    sessionManager.deleteSession(id)
+    try {
+      await sessionManager.initialize()
+      sessionManager.deleteSession(id)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
   })
 
   ipcMain.handle('session:export', async (_event, filePath: string) => {

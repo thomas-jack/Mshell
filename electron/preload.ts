@@ -140,6 +140,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getByTag: (tag: string) => ipcRenderer.invoke('snippet:getByTag', tag),
     export: (filePath: string) => ipcRenderer.invoke('snippet:export', filePath),
     import: (filePath: string) => ipcRenderer.invoke('snippet:import', filePath)
+  },
+
+  // Backup operations
+  backup: {
+    getConfig: () => ipcRenderer.invoke('backup:getConfig'),
+    updateConfig: (updates: any) => ipcRenderer.invoke('backup:updateConfig', updates),
+    create: (password: string, filePath?: string) => ipcRenderer.invoke('backup:create', password, filePath),
+    restore: (filePath: string, password: string) => ipcRenderer.invoke('backup:restore', filePath, password),
+    apply: (backupData: any, options: any) => ipcRenderer.invoke('backup:apply', backupData, options),
+    list: () => ipcRenderer.invoke('backup:list'),
+    delete: (filePath: string) => ipcRenderer.invoke('backup:delete', filePath),
+    selectSavePath: (defaultPath?: string) => ipcRenderer.invoke('backup:selectSavePath', defaultPath),
+    selectOpenPath: () => ipcRenderer.invoke('backup:selectOpenPath'),
+    selectDirectory: () => ipcRenderer.invoke('backup:selectDirectory')
   }
 })
 

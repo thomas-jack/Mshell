@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow } from 'electron'
+import { promises as fs } from 'fs'
 import { sshConnectionManager, SSHConnectionOptions } from '../managers/SSHConnectionManager'
 import { logger } from '../utils/logger'
 import { knownHostsManager } from '../utils/known-hosts'
@@ -8,9 +9,34 @@ import { knownHostsManager } from '../utils/known-hosts'
  */
 export function registerSSHHandlers() {
   // 连接 SSH
-  ipcMain.handle('ssh:connect', async (_event, id: string, options: SSHConnectionOptions) => {
+  ipcMain.handle('ssh:connect', async (_event, id: string, options: any) => {
     try {
-      await sshConnectionManager.connect(id, options)
+      // 如果提供了privateKey路径，读取文件内容
+      let privateKeyBuffer: Buffer | undefined
+      if (options.privateKey && typeof options.privateKey === 'string') {
+        try {
+          privateKeyBuffer = await fs.readFile(options.privateKey)
+        } catch (error: any) {
+          logger.logError('connection', `Failed to read private key file: ${options.privateKey}`, error)
+          return { success: false, error: `无法读取密钥文件: ${error.message}` }
+        }
+      }
+
+      // 构建连接选项
+      const connectOptions: SSHConnectionOptions = {
+        host: options.host,
+        port: options.port,
+        username: options.username,
+        password: options.password,
+        privateKey: privateKeyBuffer,
+        passphrase: options.passphrase,
+        keepaliveInterval: options.keepaliveInterval,
+        keepaliveCountMax: options.keepaliveCountMax,
+        readyTimeout: options.readyTimeout,
+        sessionName: options.sessionName
+      }
+
+      await sshConnectionManager.connect(id, connectOptions)
       logger.logConnection(id, options.sessionName || 'Unknown', options.host, options.username, 'connect')
       return { success: true }
     } catch (error: any) {

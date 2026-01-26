@@ -59,31 +59,94 @@
     </div>
     
     <!-- Snippet Dialog -->
-    <el-dialog v-model="showSnippetDialog" title="Command Snippets" width="600px" class="custom-dialog">
-      <el-input
-        v-model="snippetSearch"
-        placeholder="Search snippets..."
-        :prefix-icon="Search"
-        clearable
-        class="search-input"
-      />
-      <div class="snippet-list">
-        <div
-          v-for="snippet in filteredSnippets"
-          :key="snippet.id"
-          class="snippet-item"
-          @click="selectSnippet(snippet)"
-        >
-          <div class="snippet-main">
-             <div class="snippet-name">{{ snippet.name }}</div>
-             <div class="snippet-tags" v-if="snippet.tags && snippet.tags.length">
-                <span v-for="tag in snippet.tags" :key="tag" class="tag">{{ tag }}</span>
-             </div>
+    <el-dialog 
+      v-model="showSnippetDialog" 
+      title="Command Snippets" 
+      width="800px" 
+      class="custom-dialog snippet-dialog"
+      :close-on-click-modal="false"
+    >
+      <div class="snippet-dialog-content">
+        <!-- 左侧：分类和搜索 -->
+        <div class="snippet-sidebar">
+          <!-- 搜索栏 -->
+          <div class="sidebar-search">
+            <el-input
+              v-model="snippetSearch"
+              placeholder="搜索片段..."
+              :prefix-icon="Search"
+              clearable
+            />
           </div>
-          <div class="snippet-command">{{ snippet.command }}</div>
+
+          <!-- 分类过滤 -->
+          <div class="category-filter">
+            <div 
+              class="category-item"
+              :class="{ active: filterCategory === '' }"
+              @click="filterCategory = ''"
+            >
+              <span>全部</span>
+              <el-tag size="small" round>{{ snippets.length }}</el-tag>
+            </div>
+            <div 
+              v-for="cat in categories"
+              :key="cat"
+              class="category-item"
+              :class="{ active: filterCategory === cat }"
+              @click="filterCategory = cat"
+            >
+              <span>{{ cat }}</span>
+              <el-tag size="small" round>{{ getCategoryCount(cat) }}</el-tag>
+            </div>
+          </div>
+
+          <!-- 标签过滤 -->
+          <div v-if="allTags.length > 0" class="tag-filter">
+            <div class="filter-title">标签筛选</div>
+            <div class="tag-list">
+              <el-tag
+                v-for="tag in allTags"
+                :key="tag"
+                :type="filterTags.includes(tag) ? 'primary' : 'info'"
+                size="small"
+                @click="toggleTag(tag)"
+                style="cursor: pointer; margin: 2px;"
+              >
+                {{ tag }}
+              </el-tag>
+            </div>
+          </div>
         </div>
-        <div v-if="filteredSnippets.length === 0" class="empty-snippets">
-          No snippets found
+
+        <!-- 右侧：命令列表 -->
+        <div class="snippet-list-container">
+          <div class="snippet-list">
+            <div
+              v-for="snippet in filteredSnippets"
+              :key="snippet.id"
+              class="snippet-item"
+              @click="selectSnippet(snippet)"
+            >
+              <div class="snippet-header">
+                <div class="snippet-name">{{ snippet.name }}</div>
+                <div class="snippet-meta">
+                  <el-tag v-if="snippet.category" size="small" type="info">
+                    {{ snippet.category }}
+                  </el-tag>
+                  <span class="usage-count">{{ snippet.usageCount }}次</span>
+                </div>
+              </div>
+              <div class="snippet-command">{{ snippet.command }}</div>
+              <div class="snippet-tags" v-if="snippet.tags && snippet.tags.length">
+                <span v-for="tag in snippet.tags" :key="tag" class="tag">{{ tag }}</span>
+              </div>
+            </div>
+            <div v-if="filteredSnippets.length === 0" class="empty-snippets">
+              <el-icon :size="48"><Document /></el-icon>
+              <p>未找到匹配的片段</p>
+            </div>
+          </div>
         </div>
       </div>
     </el-dialog>
@@ -158,20 +221,56 @@ const showSearch = ref(false)
 const showSnippetDialog = ref(false)
 const showVariableDialog = ref(false)
 const snippetSearch = ref('')
+const filterCategory = ref('')
+const filterTags = ref<string[]>([])
 const snippets = ref<CommandSnippet[]>([])
 const selectedSnippet = ref<CommandSnippet | null>(null)
 const variableValues = ref<Record<string, string>>({})
 
 const filteredSnippets = computed(() => {
-  if (!snippetSearch.value) return snippets.value
+  let result = snippets.value
   
-  const query = snippetSearch.value.toLowerCase()
-  return snippets.value.filter(
-    (snippet) =>
-      snippet.name.toLowerCase().includes(query) ||
-      snippet.command.toLowerCase().includes(query) ||
-      snippet.category?.toLowerCase().includes(query)
-  )
+  // 按分类过滤
+  if (filterCategory.value) {
+    result = result.filter(s => s.category === filterCategory.value)
+  }
+  
+  // 按标签过滤
+  if (filterTags.value.length > 0) {
+    result = result.filter(s => 
+      filterTags.value.some(tag => s.tags?.includes(tag))
+    )
+  }
+  
+  // 按搜索词过滤
+  if (snippetSearch.value) {
+    const query = snippetSearch.value.toLowerCase()
+    result = result.filter(
+      (snippet) =>
+        snippet.name.toLowerCase().includes(query) ||
+        snippet.command.toLowerCase().includes(query) ||
+        snippet.category?.toLowerCase().includes(query) ||
+        snippet.description?.toLowerCase().includes(query)
+    )
+  }
+  
+  return result
+})
+
+const categories = computed(() => {
+  const cats = new Set<string>()
+  snippets.value.forEach(s => {
+    if (s.category) cats.add(s.category)
+  })
+  return Array.from(cats)
+})
+
+const allTags = computed(() => {
+  const tags = new Set<string>()
+  snippets.value.forEach(s => {
+    s.tags?.forEach(t => tags.add(t))
+  })
+  return Array.from(tags)
 })
 
 const finalCommand = computed(() => {
@@ -214,7 +313,7 @@ onMounted(async () => {
       port: props.session.port,
       username: props.session.username,
       password: props.session.password,
-      privateKey: props.session.privateKey,
+      privateKey: props.session.privateKeyPath || props.session.privateKey,
       passphrase: props.session.passphrase
     })
 
@@ -296,8 +395,25 @@ const loadSnippets = async () => {
 watch(showSnippetDialog, (newValue) => {
   if (newValue) {
     loadSnippets()
+    // 重置过滤条件
+    filterCategory.value = ''
+    filterTags.value = []
+    snippetSearch.value = ''
   }
 })
+
+const getCategoryCount = (category: string) => {
+  return snippets.value.filter(s => s.category === category).length
+}
+
+const toggleTag = (tag: string) => {
+  const index = filterTags.value.indexOf(tag)
+  if (index > -1) {
+    filterTags.value.splice(index, 1)
+  } else {
+    filterTags.value.push(tag)
+  }
+}
 
 const selectSnippet = (snippet: CommandSnippet) => {
   selectedSnippet.value = snippet
@@ -499,48 +615,160 @@ defineExpose({
 }
 
 /* Snippet Dialog Styling */
-.snippet-list {
-  max-height: 400px;
+.snippet-dialog :deep(.el-dialog__body) {
+  padding: 0;
+  height: 500px;
+}
+
+.snippet-dialog-content {
+  display: flex;
+  height: 100%;
+}
+
+.snippet-sidebar {
+  width: 240px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-search {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.category-filter {
+  flex-shrink: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color);
+  max-height: 200px;
   overflow-y: auto;
-  margin-top: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+}
+
+.category-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.category-item:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.category-item.active {
+  background: rgba(14, 165, 233, 0.12);
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+.category-item span {
+  flex: 1;
+}
+
+.tag-filter {
+  flex: 1;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.filter-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.snippet-list-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.snippet-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
 }
 
 .snippet-item {
   padding: 12px;
-  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s;
   background: var(--bg-secondary);
 }
 
-.snippet-item:last-child {
-  border-bottom: none;
-}
-
 .snippet-item:hover {
   background: var(--bg-tertiary);
+  border-color: var(--primary-color);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
 }
 
-.snippet-main {
+.snippet-header {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 4px;
+  align-items: center;
+  margin-bottom: 8px;
 }
 
 .snippet-name {
   font-weight: 600;
   color: var(--text-primary);
   font-size: 14px;
+  flex: 1;
+}
+
+.snippet-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.usage-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.snippet-command {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--success-color);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 6px 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 8px;
 }
 
 .snippet-tags {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
-.tag {
+.snippet-tags .tag {
   background: var(--bg-main);
   padding: 2px 6px;
   border-radius: 4px;
@@ -549,28 +777,25 @@ defineExpose({
   border: 1px solid var(--border-color);
 }
 
-.snippet-command {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  color: var(--success-color);
-  background: rgba(0, 0, 0, 0.2);
-  padding: 4px 8px;
-  border-radius: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .empty-snippets {
-  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 32px;
   text-align: center;
   color: var(--text-tertiary);
+}
+
+.empty-snippets p {
+  margin-top: 12px;
+  font-size: 14px;
 }
 
 .command-preview {
   margin-top: 20px;
   padding: 16px;
-  background: #000;
+  background: rgba(0, 0, 0, 0.5);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
 }
@@ -589,9 +814,5 @@ defineExpose({
   color: var(--success-color);
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-.search-input :deep(.el-input__wrapper) {
-  background-color: var(--bg-main) !important;
 }
 </style>

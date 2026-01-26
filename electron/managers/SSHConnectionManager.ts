@@ -60,17 +60,7 @@ export class SSHConnectionManager extends EventEmitter {
         client.shell({
           term: 'xterm-256color',
           cols: 80,
-          rows: 24,
-          modes: {
-            // 禁用回显控制字符
-            ECHO: 1,
-            // 启用规范模式
-            ICANON: 0,
-            // 禁用扩展处理
-            IEXTEN: 0,
-            // 启用信号字符
-            ISIG: 1
-          }
+          rows: 24
         }, (err, stream) => {
           if (err) {
             connection.status = 'error'

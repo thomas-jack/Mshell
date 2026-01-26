@@ -226,7 +226,29 @@ watch(
     if (newValue) {
       if (props.session) {
         isEdit.value = true
-        Object.assign(form, props.session)
+        // 手动赋值以正确处理日期格式
+        form.name = props.session.name || ''
+        form.host = props.session.host || ''
+        form.port = props.session.port || 22
+        form.username = props.session.username || ''
+        form.authType = props.session.authType || 'password'
+        form.password = props.session.password || ''
+        form.privateKeyPath = props.session.privateKeyPath || ''
+        form.passphrase = props.session.passphrase || ''
+        form.groupId = props.session.group || ''
+        form.description = (props.session as any).description || ''
+        // 服务器管理字段
+        form.provider = props.session.provider || ''
+        // 将 Date 对象转换为字符串格式
+        form.expiryDate = props.session.expiryDate 
+          ? (props.session.expiryDate instanceof Date 
+            ? props.session.expiryDate.toISOString().slice(0, 19).replace('T', ' ')
+            : props.session.expiryDate)
+          : null
+        form.billingCycle = props.session.billingCycle || ''
+        form.billingAmount = props.session.billingAmount
+        form.billingCurrency = props.session.billingCurrency || 'CNY'
+        form.notes = props.session.notes || ''
       } else {
         isEdit.value = false
         Object.assign(form, defaultForm)
@@ -237,6 +259,15 @@ watch(
 
 watch(visible, (newValue) => {
   emit('update:modelValue', newValue)
+  // 对话框关闭时重置表单
+  if (!newValue) {
+    // 延迟重置，等待动画完成
+    setTimeout(() => {
+      Object.assign(form, defaultForm)
+      formRef.value?.clearValidate()
+      isEdit.value = false
+    }, 300)
+  }
 })
 
 const handleSelectKeyFile = async () => {

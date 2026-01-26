@@ -102,8 +102,9 @@ const handleMenuSelect = (index: string) => {
   display: flex;
   flex-direction: column;
   position: relative;
-  z-index: 100;
+  z-index: 10;
   box-shadow: var(--shadow-lg);
+  flex-shrink: 0;
 }
 
 /* Logo区域 */

@@ -22,6 +22,7 @@
                 :groups="groups"
                 @connect="handleConnect"
                 @edit="handleEditSession"
+                @refresh="loadData"
                 @create-group="handleCreateGroup"
                 @rename-group="handleRenameGroup"
                 @delete-group="handleDeleteGroup"
@@ -402,6 +403,8 @@ body,
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  z-index: 1;
+  min-width: 0; /* Prevent flex overflow */
 }
 
 /* 顶部工具栏 */
@@ -415,7 +418,7 @@ body,
   padding: 0 var(--spacing-lg);
   -webkit-app-region: drag;
   box-shadow: var(--shadow-sm);
-  z-index: 10;
+  z-index: 5;
 }
 
 .app-title-drag {

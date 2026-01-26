@@ -9,8 +9,10 @@ import { registerDialogHandlers } from './ipc/dialog-handlers'
 import { registerFsHandlers } from './ipc/fs-handlers'
 import { registerPortForwardHandlers } from './ipc/port-forward-handlers'
 import { registerSnippetHandlers } from './ipc/snippet-handlers'
+import { registerBackupHandlers } from './ipc/backup-handlers'
 import { crashRecoveryManager } from './utils/crash-recovery'
 import { logger } from './utils/logger'
+import { backupManager } from './managers/BackupManager'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -24,6 +26,7 @@ registerDialogHandlers()
 registerFsHandlers()
 registerPortForwardHandlers()
 registerSnippetHandlers()
+registerBackupHandlers()
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -110,13 +113,16 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   crashRecoveryManager.start()
   
   const crashCheck = crashRecoveryManager.checkForCrash()
   if (crashCheck.crashed) {
     logger.logError('system', 'Application crashed on previous run', new Error('Crash detected'))
   }
+  
+  // 初始化备份管理器
+  await backupManager.initialize()
   
   createWindow()
   registerGlobalShortcuts()
@@ -136,6 +142,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   crashRecoveryManager.stop()
+  backupManager.cleanup()
   globalShortcut.unregisterAll()
 })
 

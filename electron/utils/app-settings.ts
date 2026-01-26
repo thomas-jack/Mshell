@@ -10,9 +10,9 @@ export interface AppSettings {
     minimizeToTray: boolean
   }
   terminal: {
-    defaultFontSize: number
-    defaultFontFamily: string
-    defaultTheme: string
+    fontSize: number
+    fontFamily: string
+    theme: string
     scrollback: number
     cursorStyle: 'block' | 'underline' | 'bar'
     cursorBlink: boolean
@@ -23,6 +23,11 @@ export interface AppSettings {
     defaultLocalPath: string
     confirmBeforeDelete: boolean
     showHiddenFiles: boolean
+  }
+  ssh: {
+    timeout: number
+    keepalive: boolean
+    keepaliveInterval: number
   }
   security: {
     savePasswords: boolean
@@ -55,9 +60,9 @@ class AppSettingsManager {
         minimizeToTray: true
       },
       terminal: {
-        defaultFontSize: 14,
-        defaultFontFamily: 'Consolas, monospace',
-        defaultTheme: 'dark',
+        fontSize: 14,
+        fontFamily: 'Consolas, monospace',
+        theme: 'dark',
         scrollback: 10000,
         cursorStyle: 'block',
         cursorBlink: true,
@@ -68,6 +73,11 @@ class AppSettingsManager {
         defaultLocalPath: app.getPath('downloads'),
         confirmBeforeDelete: true,
         showHiddenFiles: false
+      },
+      ssh: {
+        timeout: 30,
+        keepalive: true,
+        keepaliveInterval: 60
       },
       security: {
         savePasswords: true,
@@ -113,6 +123,7 @@ class AppSettingsManager {
       general: { ...this.settings.general, ...updates.general },
       terminal: { ...this.settings.terminal, ...updates.terminal },
       sftp: { ...this.settings.sftp, ...updates.sftp },
+      ssh: { ...this.settings.ssh, ...updates.ssh },
       security: { ...this.settings.security, ...updates.security },
       updates: { ...this.settings.updates, ...updates.updates }
     }

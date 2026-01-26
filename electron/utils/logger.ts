@@ -27,11 +27,11 @@ class Logger {
     this.logDir = path.join(userDataPath, 'logs')
     this.sessionLogging = new Map()
     this.sessionLogFiles = new Map()
-    
+
     if (!fs.existsSync(this.logDir)) {
       fs.mkdirSync(this.logDir, { recursive: true })
     }
-    
+
     const date = new Date().toISOString().split('T')[0]
     this.currentLogFile = path.join(this.logDir, `mshell-${date}.log`)
   }
@@ -50,7 +50,7 @@ class Logger {
       details: entry.details ? this.sanitize(entry.details) : undefined,
       error: entry.error ? this.sanitize(entry.error) : undefined
     }
-    
+
     const logLine = JSON.stringify(sanitizedEntry) + '\n'
     fs.appendFileSync(this.currentLogFile, logLine)
   }
@@ -68,6 +68,18 @@ class Logger {
       username,
       message: `${action} ${username}@${host}`,
       error
+    })
+  }
+
+  logInfo(category: 'connection' | 'sftp' | 'system' | 'session', message: string, details?: string): void {
+    const { v4: uuidv4 } = require('uuid')
+    this.writeLog({
+      id: uuidv4(),
+      timestamp: new Date(),
+      level: 'info',
+      category,
+      message,
+      details
     })
   }
 
@@ -98,44 +110,44 @@ class Logger {
 
   logSessionData(sessionId: string, direction: 'input' | 'output', data: string): void {
     if (!this.sessionLogging.get(sessionId)) return
-    
+
     const logFile = this.sessionLogFiles.get(sessionId)
     if (!logFile) return
-    
+
     const sanitizedData = this.sanitize(data)
     const timestamp = new Date().toISOString()
     const logLine = `[${timestamp}] ${direction}: ${sanitizedData}\n`
-    
+
     fs.appendFileSync(logFile, logLine)
   }
 
   getLogs(filter?: { startDate?: Date; endDate?: Date; host?: string; level?: string }): LogEntry[] {
     const logs: LogEntry[] = []
     const files = fs.readdirSync(this.logDir).filter(f => f.startsWith('mshell-') && f.endsWith('.log'))
-    
+
     for (const file of files) {
       const content = fs.readFileSync(path.join(this.logDir, file), 'utf-8')
       const lines = content.split('\n').filter(l => l.trim())
-      
+
       for (const line of lines) {
         try {
           const entry: LogEntry = JSON.parse(line)
           entry.timestamp = new Date(entry.timestamp)
-          
+
           if (filter) {
             if (filter.startDate && entry.timestamp < filter.startDate) continue
             if (filter.endDate && entry.timestamp > filter.endDate) continue
             if (filter.host && entry.host !== filter.host) continue
             if (filter.level && entry.level !== filter.level) continue
           }
-          
+
           logs.push(entry)
         } catch (e) {
           // Skip invalid lines
         }
       }
     }
-    
+
     return logs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
   }
 }
