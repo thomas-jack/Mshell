@@ -1,0 +1,293 @@
+<template>
+  <div class="sidebar">
+    <!-- Logo区域 -->
+    <div class="sidebar-header">
+      <div class="logo-wrapper">
+        <div class="logo-icon">
+          <span class="logo-text">M</span>
+          <div class="logo-glow"></div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 主导航 -->
+    <nav class="sidebar-nav">
+      <el-tooltip 
+        v-for="item in mainMenuItems" 
+        :key="item.index"
+        :content="item.label" 
+        placement="right" 
+        :offset="12"
+        :show-after="300"
+      >
+        <div 
+          class="nav-item"
+          :class="{ 'is-active': activeMenu === item.index }"
+          @click="handleMenuSelect(item.index)"
+        >
+          <el-icon class="nav-icon" :size="20">
+            <component :is="item.icon" />
+          </el-icon>
+          <div class="nav-indicator"></div>
+        </div>
+      </el-tooltip>
+    </nav>
+
+    <div class="spacer"></div>
+
+    <!-- 底部导航 -->
+    <nav class="sidebar-nav sidebar-nav-bottom">
+      <el-tooltip 
+        v-for="item in bottomMenuItems" 
+        :key="item.index"
+        :content="item.label" 
+        placement="right" 
+        :offset="12"
+        :show-after="300"
+      >
+        <div 
+          class="nav-item"
+          :class="{ 'is-active': activeMenu === item.index }"
+          @click="handleMenuSelect(item.index)"
+        >
+          <el-icon class="nav-icon" :size="20">
+            <component :is="item.icon" />
+          </el-icon>
+          <div class="nav-indicator"></div>
+        </div>
+      </el-tooltip>
+    </nav>
+
+    <!-- 版本信息 -->
+    <div class="sidebar-footer">
+      <div class="version-badge">v0.1.0</div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { Connection, FolderOpened, Share, Document, Tickets, Setting } from '@element-plus/icons-vue'
+
+const activeMenu = ref('sessions')
+
+const mainMenuItems = [
+  { index: 'sessions', label: '会话管理', icon: Connection },
+  { index: 'sftp', label: '文件传输', icon: FolderOpened },
+  { index: 'port-forward', label: '端口转发', icon: Share },
+  { index: 'snippets', label: '命令片段', icon: Document }
+]
+
+const bottomMenuItems = [
+  { index: 'logs', label: '系统日志', icon: Tickets },
+  { index: 'settings', label: '设置', icon: Setting }
+]
+
+const emit = defineEmits<{
+  menuSelect: [index: string]
+}>()
+
+const handleMenuSelect = (index: string) => {
+  activeMenu.value = index
+  emit('menuSelect', index)
+}
+</script>
+
+<style scoped>
+.sidebar {
+  width: 72px;
+  height: 100%;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 100;
+  box-shadow: var(--shadow-lg);
+}
+
+/* Logo区域 */
+.sidebar-header {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-md);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.logo-wrapper {
+  position: relative;
+}
+
+.logo-icon {
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  box-shadow: var(--shadow-md);
+}
+
+.logo-icon:hover {
+  transform: scale(1.05) rotate(-5deg);
+  box-shadow: var(--shadow-glow);
+}
+
+.logo-text {
+  font-weight: 800;
+  font-size: 24px;
+  color: white;
+  z-index: 1;
+  position: relative;
+}
+
+.logo-glow {
+  position: absolute;
+  inset: -4px;
+  background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
+  border-radius: var(--radius-lg);
+  opacity: 0;
+  filter: blur(12px);
+  transition: opacity var(--transition-normal);
+  z-index: 0;
+}
+
+.logo-icon:hover .logo-glow {
+  opacity: 0.6;
+}
+
+/* 导航区域 */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-md) var(--spacing-sm);
+}
+
+.sidebar-nav-bottom {
+  padding-bottom: var(--spacing-sm);
+}
+
+.nav-item {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+  background: transparent;
+}
+
+.nav-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-lg);
+  background: var(--bg-hover);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.nav-item:hover::before {
+  opacity: 1;
+}
+
+.nav-item:hover {
+  color: var(--text-primary);
+}
+
+.nav-item.is-active {
+  color: var(--primary-color);
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.nav-item.is-active::before {
+  opacity: 0;
+}
+
+.nav-icon {
+  position: relative;
+  z-index: 1;
+  transition: transform var(--transition-fast);
+}
+
+.nav-item:hover .nav-icon {
+  transform: scale(1.1);
+}
+
+.nav-item.is-active .nav-icon {
+  transform: scale(1.05);
+}
+
+/* 激活指示器 */
+.nav-indicator {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 0;
+  background: linear-gradient(180deg, var(--primary-color), var(--accent-color));
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  transition: height var(--transition-normal);
+}
+
+.nav-item.is-active .nav-indicator {
+  height: 24px;
+}
+
+/* 间隔 */
+.spacer {
+  flex: 1;
+  min-height: var(--spacing-md);
+}
+
+/* 底部版本信息 */
+.sidebar-footer {
+  padding: var(--spacing-sm);
+  display: flex;
+  justify-content: center;
+  border-top: 1px solid var(--border-light);
+}
+
+.version-badge {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+/* 响应式 */
+@media (max-height: 600px) {
+  .sidebar-header {
+    height: 60px;
+  }
+  
+  .logo-icon {
+    width: 36px;
+    height: 36px;
+  }
+  
+  .logo-text {
+    font-size: 20px;
+  }
+  
+  .nav-item {
+    width: 48px;
+    height: 48px;
+  }
+}
+</style>
