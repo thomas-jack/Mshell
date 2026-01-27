@@ -50,7 +50,7 @@ let webglAddon: WebglAddon | null = null
 let searchAddon: SearchAddon | null = null
 let webLinksAddon: WebLinksAddon | null = null
 let resizeObserver: ResizeObserver | null = null
-const currentSearchTerm = ref('')
+
 
 onMounted(() => {
   if (!terminalContainer.value) return
@@ -68,7 +68,15 @@ onMounted(() => {
     scrollback: props.options.scrollback,
     theme: theme,
     allowProposedApi: true,
-    convertEol: true
+    convertEol: true,
+    // 关键：正确处理按键映射
+    windowsMode: true, // Windows环境下启用
+    altClickMovesCursor: true,
+    rightClickSelectsWord: false,
+    // 确保正确处理特殊按键
+    macOptionIsMeta: false,
+    // 启用本地回显模式以更好地处理按键
+    disableStdin: false
   })
 
   // Load addons
@@ -136,6 +144,34 @@ onMounted(() => {
       return false
     }
     
+    // Ctrl+L: Clear screen (让终端自己处理，不拦截)
+    if (event.ctrlKey && event.key === 'l') {
+      // 让xterm.js正常处理，它会发送清屏命令到SSH
+      return true
+    }
+    
+    // 确保特殊按键正确传递到SSH服务器
+    // Delete, Backspace, Home, End, PageUp, PageDown等
+    // 这些按键应该由xterm.js自动处理并转换为正确的ANSI序列
+    // 我们只需要确保不拦截它们
+    const specialKeys = ['Delete', 'Backspace', 'Home', 'End', 'PageUp', 'PageDown', 
+                         'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                         'Insert', 'Tab', 'Enter', 'Escape']
+    
+    if (specialKeys.includes(event.key)) {
+      // 让xterm.js处理这些特殊按键
+      return true
+    }
+    
+    // 功能键 F1-F12
+    if (event.key.startsWith('F') && event.key.length <= 3) {
+      const fNum = parseInt(event.key.substring(1))
+      if (fNum >= 1 && fNum <= 12) {
+        // 让xterm.js处理功能键
+        return true
+      }
+    }
+    
     return true
   })
 
@@ -195,6 +231,18 @@ onMounted(() => {
 
   // Handle terminal input
   terminal.onData((data) => {
+    // 调试模式：记录按键数据（可选）
+    if (import.meta.env.DEV) {
+      // 在开发模式下，记录特殊按键的十六进制表示
+      const hasSpecialChars = /[\x00-\x1F\x7F-\xFF]/.test(data)
+      if (hasSpecialChars) {
+        const hex = Array.from(data)
+          .map(c => '0x' + c.charCodeAt(0).toString(16).padStart(2, '0'))
+          .join(' ')
+        console.debug('[Terminal Key]', { raw: data, hex, length: data.length })
+      }
+    }
+    
     emit('data', data)
     // Also send via IPC
     window.electronAPI.ssh.write(props.connectionId, data)

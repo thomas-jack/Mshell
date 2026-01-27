@@ -57,10 +57,28 @@ export class SSHConnectionManager extends EventEmitter {
         connection.lastActivity = new Date()
 
         // 打开 shell，设置终端类型和环境变量
+        // 使用更兼容的终端模式配置
         client.shell({
           term: 'xterm-256color',
           cols: 80,
-          rows: 24
+          rows: 24,
+          modes: {
+            // 启用正确的终端模式
+            ECHO: 1,      // 启用回显
+            ICANON: 0,    // 禁用规范模式（逐字符处理）
+            ISIG: 1,      // 启用信号处理
+            ICRNL: 1,     // 将CR转换为NL
+            ONLCR: 1,     // 将NL转换为CRNL
+            OPOST: 1,     // 启用输出处理
+            IUTF8: 1      // 启用UTF-8
+          },
+          env: {
+            // 设置终端环境变量
+            TERM: 'xterm-256color',
+            COLORTERM: 'truecolor',
+            LANG: 'en_US.UTF-8',
+            LC_ALL: 'en_US.UTF-8'
+          }
         }, (err, stream) => {
           if (err) {
             connection.status = 'error'
@@ -152,14 +170,21 @@ export class SSHConnectionManager extends EventEmitter {
 
   /**
    * 写入数据到 SSH 连接
+   * 支持字符串和Buffer类型，确保正确处理特殊字符和二进制数据
    */
-  write(id: string, data: string): void {
+  write(id: string, data: string | Buffer): void {
     const connection = this.connections.get(id)
     if (!connection || !connection.stream) {
       throw new Error(`Connection not ready: ${id}`)
     }
 
-    connection.stream.write(data)
+    // 确保数据被正确写入，支持字符串和Buffer
+    if (typeof data === 'string') {
+      connection.stream.write(data, 'utf8')
+    } else {
+      connection.stream.write(data)
+    }
+    
     connection.lastActivity = new Date()
   }
 

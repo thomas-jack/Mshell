@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { registerSSHHandlers } from './ipc/ssh-handlers'
 import { registerSessionHandlers } from './ipc/session-handlers'
@@ -58,9 +58,9 @@ function createWindow() {
       const url = 'http://127.0.0.1:5173'
       let retries = 0
       const maxRetries = 15
-      
+
       console.log('Waiting for Vite dev server at', url)
-      
+
       while (retries < maxRetries) {
         try {
           // 先测试服务器是否可达
@@ -79,7 +79,7 @@ function createWindow() {
               reject(new Error('Timeout'))
             })
           })
-          
+
           // 服务器可达，加载页面
           await mainWindow!.loadURL(url)
           mainWindow!.webContents.openDevTools()
@@ -98,11 +98,50 @@ function createWindow() {
         }
       }
     }
-    
+
     loadDevServer()
   } else {
     mainWindow.loadFile(join(__dirname, '../dist/index.html'))
   }
+
+  // Handle local shortcuts
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    // Check for Ctrl/Cmd modifier
+    const control = process.platform === 'darwin' ? input.meta : input.control
+
+    if (control && input.type === 'keyDown') {
+      switch (input.key.toLowerCase()) {
+        case 'n':
+          mainWindow?.webContents.send('shortcut:new-connection')
+          event.preventDefault()
+          break
+        case 'k':
+          mainWindow?.webContents.send('shortcut:quick-connect')
+          event.preventDefault()
+          break
+        case 'f':
+          mainWindow?.webContents.send('shortcut:search')
+          event.preventDefault()
+          break
+        case 'w':
+          mainWindow?.webContents.send('shortcut:close-tab')
+          event.preventDefault()
+          break
+        case ',':
+          mainWindow?.webContents.send('shortcut:settings')
+          event.preventDefault()
+          break
+        case 'tab':
+          if (input.shift) {
+            mainWindow?.webContents.send('shortcut:prev-tab')
+          } else {
+            mainWindow?.webContents.send('shortcut:next-tab')
+          }
+          event.preventDefault()
+          break
+      }
+    }
+  })
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
@@ -115,17 +154,16 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   crashRecoveryManager.start()
-  
+
   const crashCheck = crashRecoveryManager.checkForCrash()
   if (crashCheck.crashed) {
     logger.logError('system', 'Application crashed on previous run', new Error('Crash detected'))
   }
-  
+
   // 初始化备份管理器
   await backupManager.initialize()
-  
+
   createWindow()
-  registerGlobalShortcuts()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -143,42 +181,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   crashRecoveryManager.stop()
   backupManager.cleanup()
-  globalShortcut.unregisterAll()
 })
 
-function registerGlobalShortcuts() {
-  // Ctrl+N: New connection
-  globalShortcut.register('CommandOrControl+N', () => {
-    mainWindow?.webContents.send('shortcut:new-connection')
-  })
 
-  // Ctrl+K: Quick connect
-  globalShortcut.register('CommandOrControl+K', () => {
-    mainWindow?.webContents.send('shortcut:quick-connect')
-  })
-
-  // Ctrl+F: Search
-  globalShortcut.register('CommandOrControl+F', () => {
-    mainWindow?.webContents.send('shortcut:search')
-  })
-
-  // Ctrl+W: Close tab
-  globalShortcut.register('CommandOrControl+W', () => {
-    mainWindow?.webContents.send('shortcut:close-tab')
-  })
-
-  // Ctrl+Tab: Next tab
-  globalShortcut.register('CommandOrControl+Tab', () => {
-    mainWindow?.webContents.send('shortcut:next-tab')
-  })
-
-  // Ctrl+Shift+Tab: Previous tab
-  globalShortcut.register('CommandOrControl+Shift+Tab', () => {
-    mainWindow?.webContents.send('shortcut:prev-tab')
-  })
-
-  // Ctrl+,: Settings
-  globalShortcut.register('CommandOrControl+,', () => {
-    mainWindow?.webContents.send('shortcut:settings')
-  })
-}
