@@ -84,10 +84,7 @@
                     <el-icon :size="12"><Monitor /></el-icon>
                     {{ session.host }}
                   </span>
-                  <span class="detail-item">
-                    <el-icon :size="12"><Monitor /></el-icon>
-                    {{ session.host }}
-                  </span>
+
                 </div>
               </div>
               
@@ -565,6 +562,7 @@ const handleRenameGroup = () => {
   display: flex;
   flex-direction: column;
   background: transparent;
+  transition: background-color var(--transition-normal);
 }
 
 /* 头部区域 */

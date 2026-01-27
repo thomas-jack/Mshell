@@ -157,6 +157,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     selectSavePath: (defaultPath?: string) => ipcRenderer.invoke('backup:selectSavePath', defaultPath),
     selectOpenPath: () => ipcRenderer.invoke('backup:selectOpenPath'),
     selectDirectory: () => ipcRenderer.invoke('backup:selectDirectory')
+  },
+
+  // App info
+  app: {
+    getVersion: () => ipcRenderer.invoke('app:getVersion')
   }
 })
 
@@ -195,10 +200,9 @@ export interface ElectronAPI {
     reset: () => Promise<void>
     onChange: (callback: (settings: any) => void) => void
   }
-}
-
-declare global {
-  interface Window {
-    electronAPI: ElectronAPI
+  app: {
+    getVersion: () => Promise<string>
   }
 }
+
+

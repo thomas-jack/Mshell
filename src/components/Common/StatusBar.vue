@@ -16,14 +16,14 @@
         {{ transferCount }} transfers
       </span>
       <span class="status-item">
-        {{ appVersion }}
+        {{ displayVersion }}
       </span>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { Connection, Loading } from '@element-plus/icons-vue'
 import type { SessionConfig } from '@/types/session'
 
@@ -38,8 +38,24 @@ const props = withDefaults(defineProps<Props>(), {
   activeConnections: 0,
   currentSession: null,
   transferCount: 0,
-  appVersion: 'v0.1.0'
+  appVersion: 'v0.1.3' // Updated default
 })
+
+const dynamicVersion = ref('')
+
+onMounted(async () => {
+  if (window.electronAPI.app && window.electronAPI.app.getVersion) {
+    try {
+      const v = await window.electronAPI.app.getVersion()
+      dynamicVersion.value = `v${v}`
+    } catch (e) {
+      console.error('Failed to get app version:', e)
+    }
+  }
+})
+
+// Use dynamic version if available, otherwise fallback to prop or default
+const displayVersion = computed(() => dynamicVersion.value || props.appVersion)
 
 const transferring = computed(() => props.transferCount > 0)
 </script>

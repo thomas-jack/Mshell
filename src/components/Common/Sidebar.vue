@@ -3,8 +3,8 @@
     <!-- Logo区域 -->
     <div class="sidebar-header">
       <div class="logo-wrapper">
-        <div class="logo-icon">
-          <span class="logo-text">M</span>
+        <div class="logo-icon has-image">
+          <img :src="logoImg" alt="Logo" class="logo-image" />
           <div class="logo-glow"></div>
         </div>
       </div>
@@ -60,22 +60,36 @@
 
     <!-- 版本信息 -->
     <div class="sidebar-footer">
-      <div class="version-badge">v0.1.0</div>
+      <div class="version-badge">{{ appVersion }}</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Connection, FolderOpened, Share, Document, Tickets, Setting } from '@element-plus/icons-vue'
+import { ref, onMounted } from 'vue'
+import { Connection, FolderOpened, Share, Document, Tickets, Setting, DataAnalysis } from '@element-plus/icons-vue'
+import logoImg from '@/assets/logo.png'
 
 const activeMenu = ref('sessions')
+const appVersion = ref('v0.1.3')
+
+onMounted(async () => {
+  if (window.electronAPI.app && window.electronAPI.app.getVersion) {
+    try {
+      const version = await window.electronAPI.app.getVersion()
+      appVersion.value = `v${version}`
+    } catch (e) {
+      console.error('Failed to get app version:', e)
+    }
+  }
+})
 
 const mainMenuItems = [
   { index: 'sessions', label: '会话管理', icon: Connection },
   { index: 'sftp', label: '文件传输', icon: FolderOpened },
   { index: 'port-forward', label: '端口转发', icon: Share },
-  { index: 'snippets', label: '命令片段', icon: Document }
+  { index: 'snippets', label: '命令片段', icon: Document },
+  { index: 'statistics', label: '统计分析', icon: DataAnalysis }
 ]
 
 const bottomMenuItems = [
@@ -85,6 +99,7 @@ const bottomMenuItems = [
 
 const emit = defineEmits<{
   menuSelect: [index: string]
+  version: [v: string]
 }>()
 
 const handleMenuSelect = (index: string) => {
@@ -99,6 +114,7 @@ const handleMenuSelect = (index: string) => {
   height: 100%;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
+  transition: background-color var(--transition-normal), border-color var(--transition-normal);
   display: flex;
   flex-direction: column;
   position: relative;
@@ -124,7 +140,7 @@ const handleMenuSelect = (index: string) => {
 .logo-icon {
   width: 44px;
   height: 44px;
-  background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
+  background: transparent;
   border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
@@ -132,22 +148,26 @@ const handleMenuSelect = (index: string) => {
   position: relative;
   cursor: pointer;
   transition: all var(--transition-normal);
-  box-shadow: var(--shadow-md);
+}
+
+.logo-icon.has-image {
+  background: transparent;
+}
+
+.logo-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-lg);
+  z-index: 2;
 }
 
 .logo-icon:hover {
   transform: scale(1.05) rotate(-5deg);
-  box-shadow: var(--shadow-glow);
+  /* box-shadow: var(--shadow-glow); */
 }
 
-.logo-text {
-  font-weight: 800;
-  font-size: 24px;
-  color: white;
-  z-index: 1;
-  position: relative;
-}
-
+/* Optional: keep glow behind if desired, but image might cover it */
 .logo-glow {
   position: absolute;
   inset: -4px;
@@ -282,8 +302,8 @@ const handleMenuSelect = (index: string) => {
     height: 36px;
   }
   
-  .logo-text {
-    font-size: 20px;
+  .logo-image {
+    border-radius: var(--radius-md);
   }
   
   .nav-item {

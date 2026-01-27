@@ -91,6 +91,10 @@
           <div v-show="activeView === 'snippets'" class="content-panel">
             <SnippetPanel />
           </div>
+
+          <div v-show="activeView === 'statistics'" class="content-panel">
+            <StatisticsPanel ref="statisticsPanel" />
+          </div>
           
           <div v-show="activeView === 'logs'" class="content-panel">
             <LogViewer />
@@ -145,6 +149,7 @@ import LogViewer from './components/Common/LogViewer.vue'
 import SFTPPanel from './components/SFTP/SFTPPanel.vue'
 import PortForwardPanel from './components/PortForward/PortForwardPanel.vue'
 import SnippetPanel from './components/Snippet/SnippetPanel.vue'
+import StatisticsPanel from './components/Statistics/StatisticsPanel.vue'
 import type { SessionConfig, SessionGroup } from './types/session'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -163,6 +168,7 @@ const showSessionForm = ref(false)
 const showQuickConnect = ref(false)
 const showTerminalSettings = ref(false)
 const editingSession = ref<SessionConfig | null>(null)
+const statisticsPanel = ref()
 
 const terminalOptions = ref({
   theme: 'dark',
@@ -249,6 +255,11 @@ onMounted(async () => {
 })
 
 const applySettings = (settings: any) => {
+  // Apply theme
+  if (settings.general && settings.general.theme) {
+    applyTheme(settings.general.theme)
+  }
+
   if (settings.terminal) {
     terminalOptions.value = {
       ...terminalOptions.value,
@@ -263,6 +274,25 @@ const applySettings = (settings: any) => {
   }
 }
 
+const applyTheme = (theme: 'light' | 'dark' | 'auto') => {
+  const root = document.documentElement
+  let isDark = true
+
+  if (theme === 'auto') {
+    isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  } else {
+    isDark = theme === 'dark'
+  }
+
+  if (isDark) {
+    root.classList.remove('light-theme')
+    root.classList.add('dark')
+  } else {
+    root.classList.remove('dark')
+    root.classList.add('light-theme')
+  }
+}
+
 const handleMenuSelect = (index: string) => {
   activeView.value = index
 }
@@ -271,7 +301,7 @@ const handleSearch = (query: string) => {
   console.log('Search:', query)
 }
 
-const handleConnect = (session: SessionConfig) => {
+const handleConnect = async (session: SessionConfig) => {
   const tabId = uuidv4()
   const tab: Tab = {
     id: tabId,
@@ -281,6 +311,25 @@ const handleConnect = (session: SessionConfig) => {
   
   tabs.value.push(tab)
   activeTab.value = tabId
+
+  // Update usage stats
+  try {
+    const usageCount = (session.usageCount || 0) + 1
+    const lastConnected = new Date()
+    await window.electronAPI.session.update(session.id, { usageCount, lastConnected })
+    
+    // Update local session data to reflect changes immediately in UI if needed, 
+    // although reloading data might be safer but stats usually don't need instant refresh
+    session.usageCount = usageCount
+    session.lastConnected = lastConnected
+    
+    // Refresh stats panel if active
+    if (activeView.value === 'statistics' && statisticsPanel.value) {
+      statisticsPanel.value.loadData()
+    }
+  } catch (error) {
+    console.error('Failed to update session usage stats:', error)
+  }
 }
 
 const handleQuickConnectSubmit = (config: {

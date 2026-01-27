@@ -303,7 +303,7 @@
             <div class="app-info">
               <div class="app-logo">M</div>
               <h2>MShell</h2>
-              <p class="version">版本 0.1.0</p>
+              <p class="version">版本 {{ appVersion }}</p>
               <p class="description">专业的SSH客户端</p>
             </div>
             
@@ -437,7 +437,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, toRaw } from 'vue'
+import { ref, onMounted, toRaw, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Upload, Refresh } from '@element-plus/icons-vue'
 import { themes } from '@/utils/terminal-themes'
@@ -503,10 +503,28 @@ const restoreBackupData = ref<any>(null)
 const restoreOptions = ref<string[]>(['sessions', 'snippets', 'settings'])
 const backupLoading = ref(false)
 
-onMounted(() => {
+const appVersion = ref('0.1.3')
+
+watch(() => settings.value.general.theme, (newTheme) => {
+  if (newTheme === 'light' && settings.value.terminal.theme === 'dark') {
+    settings.value.terminal.theme = 'light'
+  } else if (newTheme === 'dark' && settings.value.terminal.theme === 'light') {
+    settings.value.terminal.theme = 'dark'
+  }
+})
+
+onMounted(async () => {
   loadSettings()
   loadBackupConfig()
   loadBackupList()
+  
+  if (window.electronAPI.app && window.electronAPI.app.getVersion) {
+    try {
+      appVersion.value = await window.electronAPI.app.getVersion()
+    } catch (e) {
+      console.error('Failed to get app version:', e)
+    }
+  }
 })
 
 const loadSettings = async () => {
@@ -793,6 +811,7 @@ const checkForUpdates = async () => {
   width: 100%;
   height: 100%;
   background: var(--bg-main);
+  transition: background-color var(--transition-normal);
 }
 
 /* 头部 */

@@ -23,6 +23,8 @@ registerSFTPHandlers()
 registerSettingsHandlers()
 registerLogHandlers()
 registerDialogHandlers()
+import { ipcMain } from 'electron'
+ipcMain.handle('app:getVersion', () => app.getVersion())
 registerFsHandlers()
 registerPortForwardHandlers()
 registerSnippetHandlers()

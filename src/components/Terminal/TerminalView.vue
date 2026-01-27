@@ -313,7 +313,9 @@ watch(
       terminal.options.cursorBlink = newOptions.cursorBlink
     }
     if (newOptions.theme) {
-      terminal.options.theme = newOptions.theme
+      terminal.options.theme = typeof newOptions.theme === 'string'
+        ? getTheme(newOptions.theme)
+        : newOptions.theme
     }
 
     // Refit after options change

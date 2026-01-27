@@ -131,6 +131,8 @@
           <el-option label="季付" value="quarterly" />
           <el-option label="半年付" value="semi-annually" />
           <el-option label="年付" value="annually" />
+          <el-option label="两年付" value="biennially" />
+          <el-option label="三年付" value="triennially" />
           <el-option label="自定义" value="custom" />
         </el-select>
       </el-form-item>
@@ -224,7 +226,7 @@ const defaultForm = {
   provider: '',
   region: '',
   expiryDate: null as string | null,
-  billingCycle: '' as '' | 'monthly' | 'quarterly' | 'semi-annually' | 'annually' | 'custom',
+  billingCycle: '' as '' | 'monthly' | 'quarterly' | 'semi-annually' | 'annually' | 'biennially' | 'triennially' | 'custom',
   billingAmount: undefined as number | undefined,
   billingCurrency: 'CNY',
   notes: ''

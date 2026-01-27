@@ -74,6 +74,9 @@ export interface ElectronAPI {
         }
     }
     onShortcut: (name: string, callback: () => void) => void
+    app: {
+        getVersion: () => Promise<string>
+    }
 }
 
 declare global {

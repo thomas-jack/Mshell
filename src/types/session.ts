@@ -17,12 +17,14 @@ export interface SessionConfig {
   provider?: string
   region?: string
   expiryDate?: Date
-  billingCycle?: 'monthly' | 'quarterly' | 'semi-annually' | 'annually' | 'custom'
+  billingCycle?: 'monthly' | 'quarterly' | 'semi-annually' | 'annually' | 'biennially' | 'triennially' | 'custom'
   billingAmount?: number
   billingCurrency?: string
   notes?: string
   createdAt: Date
   updatedAt: Date
+  usageCount?: number
+  lastConnected?: Date
 }
 
 export interface SessionGroup {
