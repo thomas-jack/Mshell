@@ -1,5 +1,7 @@
 import { Client, ClientChannel } from 'ssh2'
 import { EventEmitter } from 'node:events'
+import * as net from 'net'
+import { appSettingsManager } from '../utils/app-settings'
 
 export interface SSHConnectionOptions {
   host: string
@@ -9,7 +11,7 @@ export interface SSHConnectionOptions {
   privateKey?: Buffer
   passphrase?: string
   keepaliveInterval?: number
-  keepaliveCountMax?: number // Add missing count option
+  keepaliveCountMax?: number
   readyTimeout?: number
   sessionName?: string
 }
@@ -19,9 +21,10 @@ export interface SSHConnection {
   options: SSHConnectionOptions
   status: 'connecting' | 'connected' | 'disconnected' | 'error'
   client: Client
+  socket?: net.Socket
   stream?: ClientChannel
   lastActivity: Date
-  keepaliveTimer?: NodeJS.Timeout
+  monitorTimer?: NodeJS.Timeout
 }
 
 /**
@@ -41,45 +44,62 @@ export class SSHConnectionManager extends EventEmitter {
   async connect(id: string, options: SSHConnectionOptions): Promise<void> {
     return new Promise((resolve, reject) => {
       const client = new Client()
+      const settings = appSettingsManager.getSettings()
+
+      // Explicitly create socket to enable TCP_NODELAY for lower latency
+      const socket = new net.Socket()
+      socket.setNoDelay(true)
 
       const connection: SSHConnection = {
         id,
         options,
         status: 'connecting',
         client,
+        socket,
         lastActivity: new Date()
       }
 
       this.connections.set(id, connection)
 
+      // Handle socket errors
+      socket.on('error', (err) => {
+        if (connection.status === 'connecting') {
+          reject(err)
+        }
+        this.emit('error', id, `Socket error: ${err.message}`)
+      })
+
+      // Setup SSH Client events
       client.on('ready', () => {
         connection.status = 'connected'
         connection.lastActivity = new Date()
 
         // 打开 shell，设置终端类型和环境变量
-        // 使用更兼容的终端模式配置
-        client.shell({
+        // Open shell with window and options
+        const window = {
           term: 'xterm-256color',
           cols: 80,
           rows: 24,
           modes: {
-            // 启用正确的终端模式
-            ECHO: 1,      // 启用回显
-            ICANON: 0,    // 禁用规范模式（逐字符处理）
-            ISIG: 1,      // 启用信号处理
-            ICRNL: 1,     // 将CR转换为NL
-            ONLCR: 1,     // 将NL转换为CRNL
-            OPOST: 1,     // 启用输出处理
-            IUTF8: 1      // 启用UTF-8
-          },
+            ECHO: 1,
+            ICANON: 0,
+            ISIG: 1,
+            ICRNL: 1,
+            ONLCR: 1,
+            OPOST: 1
+          }
+        }
+
+        const shellOptions = {
           env: {
-            // 设置终端环境变量
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
             LANG: 'en_US.UTF-8',
             LC_ALL: 'en_US.UTF-8'
           }
-        }, (err, stream) => {
+        }
+
+        client.shell(window as any, shellOptions, (err, stream) => {
           if (err) {
             connection.status = 'error'
             this.emit('error', id, err.message)
@@ -89,15 +109,15 @@ export class SSHConnectionManager extends EventEmitter {
 
           connection.stream = stream
 
-          // 监听数据
+          // 监听数据 - Pass Buffer directly to avoid string conversion overhead and encoding issues
           stream.on('data', (data: Buffer) => {
             connection.lastActivity = new Date()
-            this.emit('data', id, data.toString())
+            this.emit('data', id, data)
           })
 
           stream.on('close', () => {
             connection.status = 'disconnected'
-            this.stopKeepalive(id)
+            this.stopSessionMonitor(id)
             this.emit('close', id)
           })
 
@@ -105,8 +125,8 @@ export class SSHConnectionManager extends EventEmitter {
             this.emit('error', id, data.toString())
           })
 
-          // 启动心跳
-          this.startKeepalive(id)
+          // 启动会话监控（超时检测）
+          this.startSessionMonitor(id)
 
           resolve()
         })
@@ -115,23 +135,34 @@ export class SSHConnectionManager extends EventEmitter {
       client.on('error', (err) => {
         connection.status = 'error'
         this.emit('error', id, err.message)
-        reject(err)
+        if (connection.status === 'connecting') {
+          reject(err)
+        }
       })
 
       client.on('close', () => {
         connection.status = 'disconnected'
-        this.stopKeepalive(id)
+        this.stopSessionMonitor(id)
         this.emit('close', id)
       })
 
+      // 使用全局设置作为默认值
+      // 如果 options 中有值则优先使用 options (通常来自会话特定的配置)
+      // 但 currently frontend might not pass keepalive correctly via options if it relies on global settings
+      // So we merge logic: Priority: Options > Settings > Defaults
+
+      const keepaliveInterval = options.keepaliveInterval ??
+        (settings.ssh.keepalive ? settings.ssh.keepaliveInterval * 1000 : 0)
+
+      const readyTimeout = options.readyTimeout ?? (settings.ssh.timeout * 1000)
+
       // 连接配置
       const connectConfig: any = {
-        host: options.host,
-        port: options.port,
+        sock: socket, // Use our custom socket
         username: options.username,
-        readyTimeout: options.readyTimeout || 20000,
-        keepaliveInterval: options.keepaliveInterval || 10000, // Default to 10s
-        keepaliveCountMax: options.keepaliveCountMax || 3 // Default to 3 retries
+        readyTimeout: readyTimeout || 20000,
+        keepaliveInterval: keepaliveInterval,
+        keepaliveCountMax: options.keepaliveCountMax || 3
       }
 
       if (options.password) {
@@ -145,7 +176,10 @@ export class SSHConnectionManager extends EventEmitter {
         }
       }
 
-      client.connect(connectConfig)
+      // Connect the socket first
+      socket.connect(options.port, options.host, () => {
+        client.connect(connectConfig)
+      })
     })
   }
 
@@ -155,36 +189,43 @@ export class SSHConnectionManager extends EventEmitter {
   async disconnect(id: string): Promise<void> {
     const connection = this.connections.get(id)
     if (!connection) {
-      throw new Error(`Connection not found: ${id}`)
+      // 这里的Error可能会导致前端收到多余的错误提示，改为静默返回或warning
+      // throw new Error(`Connection not found: ${id}`)
+      console.warn(`Attempted to disconnect non-existent session: ${id}`)
+      return
     }
 
-    this.stopKeepalive(id)
+    this.stopSessionMonitor(id)
 
     if (connection.stream) {
       connection.stream.end()
     }
 
     connection.client.end()
+    if (connection.socket) {
+      connection.socket.destroy() // Ensure socket is destroyed
+    }
     this.connections.delete(id)
   }
 
   /**
    * 写入数据到 SSH 连接
-   * 支持字符串和Buffer类型，确保正确处理特殊字符和二进制数据
    */
   write(id: string, data: string | Buffer): void {
     const connection = this.connections.get(id)
     if (!connection || !connection.stream) {
-      throw new Error(`Connection not ready: ${id}`)
+      // throw new Error(`Connection not ready: ${id}`)
+      // Log warning instead of throwing to prevent app crash on race conditions
+      console.warn(`Attempted to write to non-ready session: ${id}`)
+      return
     }
 
-    // 确保数据被正确写入，支持字符串和Buffer
     if (typeof data === 'string') {
       connection.stream.write(data, 'utf8')
     } else {
       connection.stream.write(data)
     }
-    
+
     connection.lastActivity = new Date()
   }
 
@@ -194,7 +235,7 @@ export class SSHConnectionManager extends EventEmitter {
   resize(id: string, cols: number, rows: number): void {
     const connection = this.connections.get(id)
     if (!connection || !connection.stream) {
-      throw new Error(`Connection not ready: ${id}`)
+      return
     }
 
     connection.stream.setWindow(rows, cols, 0, 0)
@@ -208,45 +249,47 @@ export class SSHConnectionManager extends EventEmitter {
   }
 
   /**
-   * 启动心跳 (Manual echo as backup)
+   * 启动会话监控 (Session Timeout Monitor)
    */
-  startKeepalive(id: string): void {
+  startSessionMonitor(id: string): void {
     const connection = this.connections.get(id)
     if (!connection) return
 
-    // Clear existing timer if any
-    this.stopKeepalive(id)
+    this.stopSessionMonitor(id)
 
-    // Manual echo interval (longer than SSH level keepalive)
-    const interval = 60000
+    // Check every minute
+    const checkInterval = 60000
 
-    connection.keepaliveTimer = setInterval(() => {
+    connection.monitorTimer = setInterval(() => {
       try {
-        // Simple echo to keep channel active if idle
-        if (new Date().getTime() - connection.lastActivity.getTime() > interval) {
-          // We are not using exec here because it opens a new channel. 
-          // Best practice for keepalive is mainly handled by transport layer options above.
-          // However, if we need app-level activity:
-          // connection.stream?.write('\x00') // null byte ignored by many shells but keeps traffic flowing? Risk of side effects.
-          // Safe option: Do nothing at app level if transport keepalive is configured.
-          // Current implementation was opening `exec`, which is heavy. 
-          // Let's rely on the transport layer keepalive added in previous step.
-          // But if we must, we can check status.
+        const settings = appSettingsManager.getSettings()
+        const timeoutMinutes = settings.security.sessionTimeout
+
+        // 0 means no timeout
+        if (timeoutMinutes > 0) {
+          const idleTime = new Date().getTime() - connection.lastActivity.getTime()
+          const timeoutMs = timeoutMinutes * 60 * 1000
+
+          if (idleTime > timeoutMs) {
+            console.log(`Session ${id} timed out after ${timeoutMinutes} minutes of inactivity`)
+            this.emit('error', id, `会话已超时 (闲置超过 ${timeoutMinutes} 分钟)`)
+            this.disconnect(id).catch(console.error)
+          }
         }
       } catch (error) {
-        console.error(`Keepalive error for ${id}:`, error)
+        console.error(`Session monitor error for ${id}:`, error)
       }
-    }, interval)
+    }, checkInterval)
   }
 
   /**
-   * 停止心跳
+   * 停止会话监控
    */
-  stopKeepalive(id: string): void {
+  stopSessionMonitor(id: string): void {
     const connection = this.connections.get(id)
-    if (connection && connection.keepaliveTimer) {
-      clearInterval(connection.keepaliveTimer)
-      connection.keepaliveTimer = undefined
+    if (connection && connection.monitorTimer) {
+      clearInterval(connection.monitorTimer)
+      connection.monitorTimer = undefined
     }
   }
 

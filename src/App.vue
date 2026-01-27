@@ -194,6 +194,20 @@ onMounted(async () => {
     console.error('Failed to load sessions:', error)
   }
 
+  // Load and sync settings
+  try {
+    const settings = await window.electronAPI.settings.get()
+    if (settings) {
+      applySettings(settings)
+    }
+    
+    window.electronAPI.settings.onChange((newSettings) => {
+      applySettings(newSettings)
+    })
+  } catch (error) {
+    console.error('Failed to load settings:', error)
+  }
+
   // Register keyboard shortcuts
   // @ts-ignore
   window.electronAPI.onShortcut('new-connection', () => {
@@ -233,6 +247,21 @@ onMounted(async () => {
     }
   })
 })
+
+const applySettings = (settings: any) => {
+  if (settings.terminal) {
+    terminalOptions.value = {
+      ...terminalOptions.value,
+      theme: settings.terminal.theme,
+      fontSize: settings.terminal.fontSize,
+      fontFamily: settings.terminal.fontFamily,
+      cursorStyle: settings.terminal.cursorStyle,
+      cursorBlink: settings.terminal.cursorBlink,
+      scrollback: settings.terminal.scrollback,
+      rendererType: settings.terminal.rendererType || 'auto'
+    }
+  }
+}
 
 const handleMenuSelect = (index: string) => {
   activeView.value = index

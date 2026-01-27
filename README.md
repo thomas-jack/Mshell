@@ -57,6 +57,10 @@ MShell is a modern, feature-rich SSH client for Windows built with Electron, Vue
 - ✅ Keyboard shortcuts for common operations
 - ✅ Right-click context menus
 
+### Data Management
+- ✅ **Backup & Restore**: Securely backup sessions, snippets, and settings to a local encrypted file.
+- ✅ **Crash Recovery**: Automatically restore session state after unexpected exits.
+
 ## Keyboard Shortcuts
 
 MShell supports comprehensive keyboard shortcuts for efficient workflow. See [SHORTCUTS.md](SHORTCUTS.md) for the complete list.
@@ -145,13 +149,11 @@ npm test
 
 ## Implementation Status
 
-### Completed Tasks (Tasks 1-16)
-
+### Completed Tasks
 - ✅ Project initialization and infrastructure
 - ✅ Credential manager with encryption
 - ✅ Session manager with CRUD operations
 - ✅ SSH connection manager with full lifecycle management
-- ✅ Property-based tests for SSH connections
 - ✅ Terminal component with xterm.js integration
 - ✅ Terminal settings and themes
 - ✅ UI framework (Sidebar, Toolbar, StatusBar)
@@ -160,20 +162,21 @@ npm test
 - ✅ SFTP manager with file operations
 - ✅ Port forwarding manager
 - ✅ Command snippet manager
+- ✅ Logging system
+- ✅ Security features (known_hosts verification)
+- ✅ Search functionality (Terminal Regex Search)
+- ✅ Application settings management
+- ✅ Auto-update mechanism
+- ✅ Error handling and user feedback systems
+- ✅ Keyboard shortcuts system
+- ✅ Crash recovery and state persistence
+- ✅ Build and packaging (Windows NSIS Installer)
 
-### Remaining Tasks (Tasks 17-29)
-
-- ⏳ Logging system
-- ⏳ Security features (host key verification)
-- ⏳ Search functionality
-- ⏳ Application settings
-- ⏳ Auto-update
-- ⏳ Error handling and user feedback
-- ⏳ Keyboard shortcuts
-- ⏳ Crash recovery
+### Remaining / Planned Tasks
 - ⏳ Performance optimization
-- ⏳ Build and packaging
 - ⏳ Final testing and acceptance
+- ⏳ RDP Support (Design Phase)
+- ⏳ Cloud Sync (OneDrive/Google Drive - Design Phase)
 
 ## Testing Strategy
 

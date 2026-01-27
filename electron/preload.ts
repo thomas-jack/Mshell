@@ -73,7 +73,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     update: (updates: any) => ipcRenderer.invoke('settings:update', updates),
-    reset: () => ipcRenderer.invoke('settings:reset')
+    reset: () => ipcRenderer.invoke('settings:reset'),
+    onChange: (callback: (settings: any) => void) => {
+      ipcRenderer.on('settings:changed', (_event, settings) => callback(settings))
+    }
   },
 
   // Log operations
@@ -185,6 +188,12 @@ export interface ElectronAPI {
     uploadFile: (connectionId: string, localPath: string, remotePath: string) => Promise<void>
     downloadFile: (connectionId: string, remotePath: string, localPath: string) => Promise<void>
     onProgress: (callback: (taskId: string, progress: any) => void) => void
+  }
+  settings: {
+    get: () => Promise<any>
+    update: (updates: any) => Promise<void>
+    reset: () => Promise<void>
+    onChange: (callback: (settings: any) => void) => void
   }
 }
 

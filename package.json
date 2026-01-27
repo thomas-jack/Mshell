@@ -1,6 +1,6 @@
 {
   "name": "mshell",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "MShell - Windows SSH Client",
   "main": "dist-electron/main.js",
   "author": "MShell Team",
@@ -18,7 +18,9 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
+    "country-flag-icons": "^1.6.9",
     "element-plus": "^2.5.0",
+    "geoip-lite": "^1.4.10",
     "pinia": "^2.1.7",
     "ssh2": "^1.15.0",
     "ssh2-sftp-client": "^10.0.3",

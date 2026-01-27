@@ -17,7 +17,7 @@
             <h3>应用设置</h3>
             <el-form label-position="left">
               <el-form-item label="启动时打开">
-                <el-switch v-model="settings.general.openOnStartup" />
+                <el-switch v-model="settings.general.startWithSystem" />
               </el-form-item>
               <el-form-item label="最小化到托盘">
                 <el-switch v-model="settings.general.minimizeToTray" />
@@ -25,11 +25,63 @@
               <el-form-item label="关闭时最小化">
                 <el-switch v-model="settings.general.closeToTray" />
               </el-form-item>
+              <el-form-item label="主题">
+                <el-select v-model="settings.general.theme" style="width: 200px">
+                  <el-option label="自动" value="auto" />
+                  <el-option label="深色" value="dark" />
+                  <el-option label="浅色" value="light" />
+                </el-select>
+              </el-form-item>
               <el-form-item label="语言">
                 <el-select v-model="settings.general.language" style="width: 200px">
                   <el-option label="简体中文" value="zh-CN" />
                   <el-option label="English" value="en-US" />
                 </el-select>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-tab-pane>
+
+        <!-- SFTP设置 -->
+        <el-tab-pane label="SFTP" name="sftp">
+          <div class="settings-section">
+            <h3>传输设置</h3>
+            <el-form label-position="left">
+              <el-form-item label="默认本地路径">
+                <div style="display: flex; gap: 8px; flex: 1;">
+                  <el-input v-model="settings.sftp.defaultLocalPath" placeholder="默认下载目录" readonly />
+                  <el-button @click="selectDownloadDir">选择</el-button>
+                </div>
+              </el-form-item>
+              <el-form-item label="最大并发数">
+                <el-input-number v-model="settings.sftp.maxConcurrentTransfers" :min="1" :max="10" />
+              </el-form-item>
+              <el-form-item label="显示隐藏文件">
+                <el-switch v-model="settings.sftp.showHiddenFiles" />
+              </el-form-item>
+              <el-form-item label="删除确认">
+                <el-switch v-model="settings.sftp.confirmBeforeDelete" />
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-tab-pane>
+
+        <!-- 安全设置 -->
+        <el-tab-pane label="安全" name="security">
+          <div class="settings-section">
+            <h3>安全选项</h3>
+            <el-form label-position="left">
+              <el-form-item label="保存密码">
+                <el-switch v-model="settings.security.savePasswords" />
+                <span class="form-hint">记住SSH连接密码</span>
+              </el-form-item>
+              <el-form-item label="验证主机密钥">
+                <el-switch v-model="settings.security.verifyHostKey" />
+                <span class="form-hint">Strict Host Key Checking</span>
+              </el-form-item>
+              <el-form-item label="会话超时">
+                <el-input-number v-model="settings.security.sessionTimeout" :min="0" :step="5" />
+                <span class="form-hint">分钟 (0 表示不超时)</span>
               </el-form-item>
             </el-form>
           </div>
@@ -58,6 +110,16 @@
                   <el-option label="Monaco" value="Monaco" />
                 </el-select>
               </el-form-item>
+              <el-form-item label="配色方案">
+                <el-select v-model="settings.terminal.theme" style="width: 300px">
+                  <el-option 
+                    v-for="(theme, key) in themes" 
+                    :key="key" 
+                    :label="theme.name" 
+                    :value="key" 
+                  />
+                </el-select>
+              </el-form-item>
               <el-form-item label="光标样式">
                 <el-radio-group v-model="settings.terminal.cursorStyle">
                   <el-radio label="block">方块</el-radio>
@@ -68,9 +130,17 @@
               <el-form-item label="光标闪烁">
                 <el-switch v-model="settings.terminal.cursorBlink" />
               </el-form-item>
+              <el-form-item label="渲染类型">
+                <el-select v-model="settings.terminal.rendererType" style="width: 200px">
+                  <el-option label="自动" value="auto" />
+                  <el-option label="WebGL (推荐)" value="webgl" />
+                  <el-option label="Canvas" value="canvas" />
+                  <el-option label="DOM (慢, 兼容性好)" value="dom" />
+                </el-select>
+              </el-form-item>
               <el-form-item label="滚动行数">
                 <el-input-number 
-                  v-model="settings.terminal.scrollback" 
+                  v-model="settings.terminal.scrollback"  
                   :min="1000" 
                   :max="50000"
                   :step="1000"
@@ -205,6 +275,26 @@
                 </template>
               </el-table-column>
             </el-table>
+          </div>
+        </el-tab-pane>
+
+        <!-- 更新设置 -->
+        <el-tab-pane label="更新" name="updates">
+          <div class="settings-section">
+            <h3>自动更新</h3>
+            <el-form label-position="left">
+              <el-form-item label="自动检查更新">
+                <el-switch v-model="settings.updates.autoCheck" />
+              </el-form-item>
+              <el-form-item label="自动下载更新">
+                <el-switch v-model="settings.updates.autoDownload" />
+              </el-form-item>
+              <el-form-item label="手动检查">
+                <el-button :icon="Refresh" @click="checkForUpdates">
+                  立即检查
+                </el-button>
+              </el-form-item>
+            </el-form>
           </div>
         </el-tab-pane>
 
@@ -349,28 +439,47 @@
 <script setup lang="ts">
 import { ref, onMounted, toRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Download, Upload } from '@element-plus/icons-vue'
+import { Download, Upload, Refresh } from '@element-plus/icons-vue'
+import { themes } from '@/utils/terminal-themes'
 
 const activeTab = ref('general')
 
 const settings = ref({
   general: {
-    openOnStartup: false,
+    startWithSystem: false,
     minimizeToTray: true,
     closeToTray: false,
-    language: 'zh-CN'
+    language: 'zh-CN',
+    theme: 'dark' as 'light' | 'dark' | 'auto'
   },
   terminal: {
     fontSize: 14,
     fontFamily: 'JetBrains Mono',
-    cursorStyle: 'block',
+    cursorStyle: 'block' as 'block' | 'underline' | 'bar',
     cursorBlink: true,
-    scrollback: 10000
+    scrollback: 10000,
+    theme: 'dark',
+    rendererType: 'auto' as 'auto' | 'webgl' | 'canvas' | 'dom'
   },
   ssh: {
     timeout: 30,
     keepalive: true,
     keepaliveInterval: 60
+  },
+  sftp: {
+    maxConcurrentTransfers: 3,
+    defaultLocalPath: '',
+    confirmBeforeDelete: true,
+    showHiddenFiles: false
+  },
+  security: {
+    savePasswords: true,
+    sessionTimeout: 0,
+    verifyHostKey: true
+  },
+  updates: {
+    autoCheck: true,
+    autoDownload: false
   }
 })
 
@@ -413,9 +522,11 @@ const loadSettings = async () => {
 
 const saveSettings = async () => {
   try {
-    await window.electronAPI.settings.update(settings.value)
+    // 使用toRaw获取原始对象，避免Vue响应式代理导致的序列化问题
+    await window.electronAPI.settings.update(toRaw(settings.value))
     ElMessage.success('设置已保存')
   } catch (error) {
+    console.error('Save settings error:', error)
     ElMessage.error('保存设置失败')
   }
 }
@@ -445,6 +556,17 @@ const saveBackupConfig = async () => {
     }
   } catch (error: any) {
     ElMessage.error('保存备份配置失败: ' + error.message)
+  }
+}
+
+const selectDownloadDir = async () => {
+  try {
+    const result = await window.electronAPI.dialog.openDirectory({ properties: ['openDirectory'] })
+    if (result) {
+      settings.value.sftp.defaultLocalPath = result as unknown as string // result definition might vary
+    }
+  } catch (error) {
+    ElMessage.error('选择目录失败')
   }
 }
 
@@ -657,6 +779,10 @@ const formatFileSize = (bytes: number) => {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+}
+const checkForUpdates = async () => {
+  // Placeholder for update check logic
+  ElMessage.info('正在检查更新... (功能尚在开发中)')
 }
 </script>
 

@@ -38,6 +38,24 @@ export interface ElectronAPI {
         deleteFile: (path: string) => Promise<{ success: boolean; error?: string }>
         rename: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>
     }
+    settings: {
+        get: () => Promise<any>
+        update: (updates: any) => Promise<void>
+        reset: () => Promise<void>
+        onChange: (callback: (settings: any) => void) => void
+    }
+    backup: {
+        getConfig: () => Promise<any>
+        updateConfig: (updates: any) => Promise<any>
+        create: (password: string, filePath?: string) => Promise<any>
+        restore: (filePath: string, password: string) => Promise<any>
+        apply: (backupData: any, options: any) => Promise<any>
+        list: () => Promise<any>
+        delete: (filePath: string) => Promise<any>
+        selectSavePath: (defaultPath?: string) => Promise<any>
+        selectOpenPath: () => Promise<any>
+        selectDirectory: () => Promise<any>
+    }
     snippet: {
         getAll: () => Promise<{ success: boolean; snippets: any[] }>
         create: (data: any) => Promise<{ success: boolean; snippet?: any; error?: string }>
@@ -45,6 +63,9 @@ export interface ElectronAPI {
     }
     dialog: {
         showContextMenu: (items: any[]) => Promise<string>
+        openFile: (options: any) => Promise<string | null>
+        openDirectory: (options?: any) => Promise<string | null>
+        saveFile: (options?: any) => Promise<string | null>
     }
     process?: {
         env: {

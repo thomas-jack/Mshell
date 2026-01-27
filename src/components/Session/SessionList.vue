@@ -60,8 +60,14 @@
                 <div class="status-dot"></div>
               </div>
               
-              <div class="session-icon">
-                <el-icon :size="20"><Connection /></el-icon>
+              <div class="session-icon" :class="{ 'has-flag': !!getRegionFlag(session.region) }">
+                <span 
+                  v-if="getRegionFlag(session.region)" 
+                  class="session-flag-icon"
+                  v-html="getRegionFlag(session.region)"
+                  :title="session.region"
+                ></span>
+                <el-icon v-else :size="20"><Connection /></el-icon>
               </div>
               
               <div class="session-content">
@@ -74,6 +80,10 @@
                     {{ session.username }}
                   </span>
                   <span class="detail-separator">•</span>
+                  <span class="detail-item">
+                    <el-icon :size="12"><Monitor /></el-icon>
+                    {{ session.host }}
+                  </span>
                   <span class="detail-item">
                     <el-icon :size="12"><Monitor /></el-icon>
                     {{ session.host }}
@@ -92,28 +102,6 @@
                   >
                     {{ getExpiryText(session.expiryDate) }}
                   </el-tag>
-                </div>
-                
-                <div class="session-actions">
-                  <el-tooltip content="编辑" placement="top">
-                    <el-button 
-                      :icon="Edit" 
-                      text 
-                      circle 
-                      size="small"
-                      @click.stop="handleEdit(session)"
-                    />
-                  </el-tooltip>
-                  <el-tooltip content="删除" placement="top">
-                    <el-button 
-                      :icon="Delete" 
-                      text 
-                      circle 
-                      size="small"
-                      type="danger"
-                      @click.stop="handleDelete(session)"
-                    />
-                  </el-tooltip>
                 </div>
               </div>
             </div>
@@ -148,8 +136,14 @@
                 <div class="status-dot"></div>
               </div>
               
-              <div class="session-icon">
-                <el-icon :size="20"><Connection /></el-icon>
+              <div class="session-icon" :class="{ 'has-flag': !!getRegionFlag(session.region) }">
+                <span 
+                  v-if="getRegionFlag(session.region)" 
+                  class="session-flag-icon"
+                  v-html="getRegionFlag(session.region)"
+                  :title="session.region"
+                ></span>
+                <el-icon v-else :size="20"><Connection /></el-icon>
               </div>
               
               <div class="session-content">
@@ -180,28 +174,6 @@
                   >
                     {{ getExpiryText(session.expiryDate) }}
                   </el-tag>
-                </div>
-                
-                <div class="session-actions">
-                  <el-tooltip content="编辑" placement="top">
-                    <el-button 
-                      :icon="Edit" 
-                      text 
-                      circle 
-                      size="small"
-                      @click.stop="handleEdit(session)"
-                    />
-                  </el-tooltip>
-                  <el-tooltip content="删除" placement="top">
-                    <el-button 
-                      :icon="Delete" 
-                      text 
-                      circle 
-                      size="small"
-                      type="danger"
-                      @click.stop="handleDelete(session)"
-                    />
-                  </el-tooltip>
                 </div>
               </div>
             </div>
@@ -268,13 +240,35 @@
         <el-button type="primary" @click="handleRenameGroup">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 移动分组对话框 -->
+    <el-dialog
+      v-model="showMoveDialog"
+      title="移动到分组"
+      width="400px"
+      :close-on-click-modal="false"
+    >
+      <el-select v-model="moveGroupId" placeholder="选择分组" style="width: 100%">
+        <el-option label="未分组" value="" />
+        <el-option
+          v-for="group in groups"
+          :key="group.id"
+          :label="group.name"
+          :value="group.id"
+        />
+      </el-select>
+      <template #footer>
+        <el-button @click="showMoveDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmMove">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { 
-  Search, Connection, Edit, Delete, FolderAdd, Folder, Files, User, Monitor 
+  Search, Connection, FolderAdd, Folder, Files, User, Monitor 
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { SessionConfig, SessionGroup } from '@/types/session'
@@ -293,12 +287,16 @@ const emit = defineEmits<{
   createGroup: [group: { name: string; description?: string }]
   renameGroup: [groupId: string, newName: string]
   deleteGroup: [groupId: string]
+  refresh: []
 }>()
 
 const searchQuery = ref('')
 const activeGroups = ref<string[]>(['ungrouped'])
 const showGroupDialog = ref(false)
 const showRenameDialog = ref(false)
+const showMoveDialog = ref(false)
+const moveGroupId = ref('')
+const movingSession = ref<SessionConfig | null>(null)
 const renameGroupName = ref('')
 const currentGroup = ref<SessionGroup | null>(null)
 const groupForm = ref({
@@ -342,10 +340,6 @@ const handleSessionClick = (session: SessionConfig) => {
   emit('connect', session)
 }
 
-const handleEdit = (session: SessionConfig) => {
-  emit('edit', session)
-}
-
 const handleDelete = async (session: SessionConfig) => {
   try {
     await ElMessageBox.confirm(
@@ -358,14 +352,10 @@ const handleDelete = async (session: SessionConfig) => {
       }
     )
 
-    const result = await window.electronAPI.session.delete(session.id)
-    if (result.success) {
-      ElMessage.success('会话已删除')
-      // 重新加载会话列表
-      emit('refresh')
-    } else {
-      ElMessage.error(`删除失败: ${result.error}`)
-    }
+    await window.electronAPI.session.delete(session.id)
+    ElMessage.success('会话已删除')
+    // 重新加载会话列表
+    emit('refresh')
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(`删除失败: ${error.message}`)
@@ -373,8 +363,65 @@ const handleDelete = async (session: SessionConfig) => {
   }
 }
 
-const handleContextMenu = (session: SessionConfig, event: MouseEvent) => {
-  emit('contextMenu', session, event)
+const handleContextMenu = async (session: SessionConfig, event: MouseEvent) => {
+  event.preventDefault()
+  event.stopPropagation()
+  
+  const items = [
+    { label: '连接', action: 'connect' },
+    { type: 'separator' },
+    { label: '编辑', action: 'edit' },
+    { label: '复制会话', action: 'copy' },
+    { label: '移动到分组...', action: 'move' },
+    { type: 'separator' },
+    { label: '删除', action: 'delete' }
+  ]
+  
+  try {
+    const action = await window.electronAPI.dialog.showContextMenu(items)
+    if (action === 'connect') emit('connect', session)
+    if (action === 'edit') emit('edit', session)
+    if (action === 'copy') handleCopy(session)
+    if (action === 'move') handleMove(session)
+    if (action === 'delete') handleDelete(session)
+  } catch (error) {
+    // Ignore cancelled
+  }
+}
+
+const handleCopy = async (session: SessionConfig) => {
+  try {
+    const { id, createdAt, updatedAt, ...rest } = session
+    const newSession = {
+      ...rest,
+      name: `${session.name} (副本)`,
+    }
+    await window.electronAPI.session.create(newSession)
+    ElMessage.success('会话已复制')
+    emit('refresh')
+  } catch (err: any) {
+    ElMessage.error(err.message)
+  }
+}
+
+const handleMove = (session: SessionConfig) => {
+  movingSession.value = session
+  moveGroupId.value = session.group || ''
+  showMoveDialog.value = true
+}
+
+const confirmMove = async () => {
+  if (!movingSession.value) return
+  try {
+    await window.electronAPI.session.update(movingSession.value.id, { 
+      group: moveGroupId.value || undefined 
+    }) 
+    ElMessage.success('移动成功')
+    emit('refresh')
+    showMoveDialog.value = false
+  } catch (err: any) {
+    ElMessage.error(err.message)
+  }
 }
 
 // 计算到期时间文本和标签类型
@@ -414,6 +461,45 @@ const getExpiryTagType = (expiryDate: Date | string): 'success' | 'warning' | 'd
   } else {
     return 'success' // 30天以上
   }
+}
+
+// ... imports
+import * as FlagIcons from 'country-flag-icons/string/3x2'
+
+// ... existing code
+
+const getRegionFlag = (region?: string) => {
+  if (!region) return ''
+  
+  // Simple mapping for common inputs
+  const map: Record<string, string> = {
+    '香港': 'HK', 'Hong Kong': 'HK', 'HK': 'HK',
+    '美国': 'US', 'USA': 'US', 'US': 'US', 'Los Angeles': 'US', '洛杉矶': 'US',
+    '日本': 'JP', 'Japan': 'JP', 'JP': 'JP', 'Tokyo': 'JP', '东京': 'JP',
+    '新加坡': 'SG', 'Singapore': 'SG', 'SG': 'SG',
+    '韩国': 'KR', 'Korea': 'KR', 'KR': 'KR', 'Seoul': 'KR',
+    '中国': 'CN', 'China': 'CN', 'CN': 'CN', '上海': 'CN', '北京': 'CN',
+    '德国': 'DE', 'Germany': 'DE', 'DE': 'DE', 'Frankfurt': 'DE',
+    '英国': 'GB', 'UK': 'GB', 'GB': 'GB', 'London': 'GB',
+    '法国': 'FR', 'France': 'FR', 'FR': 'FR',
+    '俄罗斯': 'RU', 'Russia': 'RU', 'RU': 'RU',
+    '加拿大': 'CA', 'Canada': 'CA', 'CA': 'CA'
+  }
+  
+  // Try direct match or exact code match
+  let code = map[region] || (region.length === 2 ? region.toUpperCase() : undefined)
+  
+  // Try fuzzy search if no exact match
+  if (!code) {
+    const key = Object.keys(map).find(k => region.includes(k))
+    if (key) code = map[key]
+  }
+  
+  if (code && (FlagIcons as any)[code]) {
+    return (FlagIcons as any)[code]
+  }
+  
+  return ''
 }
 
 const handleCreateGroup = () => {
@@ -600,7 +686,7 @@ const handleRenameGroup = () => {
 
 .session-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start; /* 顶部对齐 */
   padding: 10px 12px; /* 减小内边距 */
   background: var(--bg-tertiary);
   border: 1px solid transparent;
@@ -677,6 +763,28 @@ const handleRenameGroup = () => {
   transform: scale(1.05);
 }
 
+.session-icon.has-flag {
+  background: transparent;
+}
+
+.session-flag-icon {
+  width: 22px;
+  height: 16px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.session-flag-icon :deep(svg) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 /* 会话内容 */
 .session-content {
   flex: 1;
@@ -742,8 +850,34 @@ const handleRenameGroup = () => {
   gap: 4px;
 }
 
-.detail-separator {
-  color: var(--text-disabled);
+.detail-flag {
+  display: inline-flex;
+  width: 16px;
+  height: 12px;
+  margin-left: 6px;
+  border-radius: 2px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.large-flag {
+  width: 20px;
+  height: 15px;
+  margin-left: 0;
+  border-radius: 3px;
+}
+
+.region-flag-wrapper {
+  margin-bottom: 4px; /* Flag gap */
+  display: flex;
+  justify-content: flex-end;
+}
+
+.detail-flag :deep(svg) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 /* 会话操作 */

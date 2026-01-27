@@ -4,6 +4,7 @@ import * as net from 'net'
 
 export interface PortForward {
   id: string
+  connectionId: string
   type: 'local' | 'remote' | 'dynamic'
   localHost: string
   localPort: number
@@ -11,6 +12,7 @@ export interface PortForward {
   remotePort: number
   status: 'active' | 'inactive' | 'error'
   error?: string
+  description?: string
 }
 
 /**
@@ -29,11 +31,18 @@ export class PortForwardManager extends EventEmitter {
   }
 
   /**
+   * 添加转发配置 (不启动)
+   */
+  addForward(forward: PortForward): void {
+    this.forwards.set(forward.id, forward)
+  }
+
+  /**
    * 设置本地端口转发
    */
   async setupLocalForward(
     id: string,
-    _connectionId: string,
+    connectionId: string,
     sshClient: Client,
     localHost: string,
     localPort: number,
@@ -41,14 +50,23 @@ export class PortForwardManager extends EventEmitter {
     remotePort: number
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const forward: PortForward = {
-        id,
-        type: 'local',
-        localHost,
-        localPort,
-        remoteHost,
-        remotePort,
-        status: 'inactive'
+      // 获取现有的转发配置或创建新的
+      let forward = this.forwards.get(id)
+      if (!forward) {
+        forward = {
+          id,
+          connectionId,
+          type: 'local',
+          localHost,
+          localPort,
+          remoteHost,
+          remotePort,
+          status: 'inactive'
+        }
+        this.forwards.set(id, forward)
+      } else {
+        // 更新连接ID，确保对应正确
+        forward.connectionId = connectionId
       }
 
       const server = net.createServer((socket) => {
@@ -78,15 +96,16 @@ export class PortForwardManager extends EventEmitter {
       })
 
       server.on('error', (err: Error) => {
-        forward.status = 'error'
-        forward.error = err.message
+        if (forward) {
+          forward.status = 'error'
+          forward.error = err.message
+        }
         this.emit('error', id, err.message)
         reject(err)
       })
 
       server.listen(localPort, localHost, () => {
-        forward.status = 'active'
-        this.forwards.set(id, forward)
+        if (forward) forward.status = 'active'
         this.servers.set(id, server)
         this.sshClients.set(id, sshClient)
         this.emit('active', id)
@@ -100,7 +119,7 @@ export class PortForwardManager extends EventEmitter {
    */
   async setupRemoteForward(
     id: string,
-    _connectionId: string,
+    connectionId: string,
     sshClient: Client,
     remoteHost: string,
     remotePort: number,
@@ -108,27 +127,35 @@ export class PortForwardManager extends EventEmitter {
     localPort: number
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const forward: PortForward = {
-        id,
-        type: 'remote',
-        localHost,
-        localPort,
-        remoteHost,
-        remotePort,
-        status: 'inactive'
+      let forward = this.forwards.get(id)
+      if (!forward) {
+        forward = {
+          id,
+          connectionId,
+          type: 'remote',
+          localHost,
+          localPort,
+          remoteHost,
+          remotePort,
+          status: 'inactive'
+        }
+        this.forwards.set(id, forward)
+      } else {
+        forward.connectionId = connectionId
       }
 
       sshClient.forwardIn(remoteHost, remotePort, (err) => {
         if (err) {
-          forward.status = 'error'
-          forward.error = err.message
+          if (forward) {
+            forward.status = 'error'
+            forward.error = err.message
+          }
           this.emit('error', id, err.message)
           reject(err)
           return
         }
 
-        forward.status = 'active'
-        this.forwards.set(id, forward)
+        if (forward) forward.status = 'active'
         this.sshClients.set(id, sshClient)
         this.emit('active', id)
         resolve()
@@ -156,20 +183,27 @@ export class PortForwardManager extends EventEmitter {
    */
   async setupDynamicForward(
     id: string,
-    _connectionId: string,
+    connectionId: string,
     sshClient: Client,
     localHost: string,
     localPort: number
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const forward: PortForward = {
-        id,
-        type: 'dynamic',
-        localHost,
-        localPort,
-        remoteHost: '',
-        remotePort: 0,
-        status: 'inactive'
+      let forward = this.forwards.get(id)
+      if (!forward) {
+        forward = {
+          id,
+          connectionId,
+          type: 'dynamic',
+          localHost,
+          localPort,
+          remoteHost: '',
+          remotePort: 0,
+          status: 'inactive'
+        }
+        this.forwards.set(id, forward)
+      } else {
+        forward.connectionId = connectionId
       }
 
       const server = net.createServer((socket) => {
@@ -225,15 +259,16 @@ export class PortForwardManager extends EventEmitter {
       })
 
       server.on('error', (err: Error) => {
-        forward.status = 'error'
-        forward.error = err.message
+        if (forward) {
+          forward.status = 'error'
+          forward.error = err.message
+        }
         this.emit('error', id, err.message)
         reject(err)
       })
 
       server.listen(localPort, localHost, () => {
-        forward.status = 'active'
-        this.forwards.set(id, forward)
+        if (forward) forward.status = 'active'
         this.servers.set(id, server)
         this.sshClients.set(id, sshClient)
         this.emit('active', id)
@@ -272,15 +307,19 @@ export class PortForwardManager extends EventEmitter {
   /**
    * 获取所有端口转发
    */
-  getAllForwards(): PortForward[] {
-    return Array.from(this.forwards.values())
+  getAllForwards(connectionId?: string): PortForward[] {
+    const all = Array.from(this.forwards.values())
+    if (connectionId) {
+      return all.filter(f => f.connectionId === connectionId)
+    }
+    return all
   }
 
   /**
    * 删除端口转发
    */
   async deleteForward(id: string): Promise<void> {
-    await this.stopForward(id)
+    await this.stopForward(id).catch(() => { }) // Ignore error if already stopped
     this.forwards.delete(id)
   }
 }

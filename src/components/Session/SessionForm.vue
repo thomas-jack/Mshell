@@ -91,6 +91,29 @@
         <el-input v-model="form.provider" placeholder="如：阿里云、腾讯云、AWS" />
       </el-form-item>
 
+      <el-form-item label="所属地区">
+        <el-select 
+          v-model="form.region" 
+          placeholder="请选择国家/地区" 
+          filterable 
+          allow-create 
+          default-first-option
+          style="width: 100%"
+        >
+          <el-option
+            v-for="item in countryOptions"
+            :key="item.value"
+            :label="item.label"
+            :value="item.value"
+          >
+            <span style="float: left">{{ item.label }}</span>
+            <span style="float: right; color: var(--el-text-color-secondary); font-size: 13px">
+              {{ item.value }}
+            </span>
+          </el-option>
+        </el-select>
+      </el-form-item>
+
       <el-form-item label="到期时间">
         <el-date-picker
           v-model="form.expiryDate"
@@ -163,6 +186,29 @@ const visible = ref(props.modelValue)
 const formRef = ref<FormInstance>()
 const isEdit = ref(false)
 
+const countryOptions = [
+  { label: '中国 (China)', value: 'CN' },
+  { label: '中国香港 (Hong Kong)', value: 'HK' },
+  { label: '中国台湾 (Taiwan)', value: 'TW' },
+  { label: '美国 (USA)', value: 'US' },
+  { label: '日本 (Japan)', value: 'JP' },
+  { label: '新加坡 (Singapore)', value: 'SG' },
+  { label: '韩国 (Korea)', value: 'KR' },
+  { label: '俄罗斯 (Russia)', value: 'RU' },
+  { label: '德国 (Germany)', value: 'DE' },
+  { label: '英国 (UK)', value: 'GB' },
+  { label: '法国 (France)', value: 'FR' },
+  { label: '加拿大 (Canada)', value: 'CA' },
+  { label: '澳大利亚 (Australia)', value: 'AU' },
+  { label: '印度 (India)', value: 'IN' },
+  { label: '巴西 (Brazil)', value: 'BR' },
+  { label: '荷兰 (Netherlands)', value: 'NL' },
+  { label: '马来西亚 (Malaysia)', value: 'MY' },
+  { label: '泰国 (Thailand)', value: 'TH' },
+  { label: '越南 (Vietnam)', value: 'VN' },
+  { label: '印度尼西亚 (Indonesia)', value: 'ID' }
+]
+
 const defaultForm = {
   name: '',
   host: '',
@@ -176,6 +222,7 @@ const defaultForm = {
   description: '',
   // 服务器管理字段
   provider: '',
+  region: '',
   expiryDate: null as string | null,
   billingCycle: '' as '' | 'monthly' | 'quarterly' | 'semi-annually' | 'annually' | 'custom',
   billingAmount: undefined as number | undefined,
@@ -239,6 +286,7 @@ watch(
         form.description = (props.session as any).description || ''
         // 服务器管理字段
         form.provider = props.session.provider || ''
+        form.region = props.session.region || ''
         // 将 Date 对象转换为字符串格式
         form.expiryDate = props.session.expiryDate 
           ? (props.session.expiryDate instanceof Date 
@@ -303,6 +351,7 @@ const handleSave = async () => {
         description: form.description,
         // 服务器管理字段
         provider: form.provider || undefined,
+        region: form.region || undefined,
         expiryDate: form.expiryDate ? new Date(form.expiryDate) : undefined,
         billingCycle: form.billingCycle || undefined,
         billingAmount: form.billingAmount,

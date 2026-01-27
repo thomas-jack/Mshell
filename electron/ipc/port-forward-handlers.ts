@@ -20,7 +20,7 @@ export function registerPortForwardHandlers() {
   // 获取所有转发
   ipcMain.handle('portForward:getAll', async (_event, connectionId: string) => {
     try {
-      const forwards = portForwardManager.getAllForwards()
+      const forwards = portForwardManager.getAllForwards(connectionId)
       return { success: true, forwards }
     } catch (error: any) {
       return { success: false, error: error.message }
@@ -42,6 +42,7 @@ export function registerPortForwardHandlers() {
         // 不自动启动，只添加配置
         const forward = {
           id,
+          connectionId,
           type: config.type,
           localHost: config.localHost,
           localPort: config.localPort,
@@ -51,8 +52,8 @@ export function registerPortForwardHandlers() {
           description: config.description
         }
 
-        // 存储转发配置（这里简化处理，实际应该持久化）
-        portForwardManager['forwards'].set(id, forward)
+        // 存储转发配置
+        portForwardManager.addForward(forward)
 
         return { success: true, id }
       } catch (error: any) {

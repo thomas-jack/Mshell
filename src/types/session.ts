@@ -12,6 +12,15 @@ export interface SessionConfig {
   passphrase?: string
   portForwards?: any[]
   color?: string
+  // Server Management Info
+  description?: string
+  provider?: string
+  region?: string
+  expiryDate?: Date
+  billingCycle?: 'monthly' | 'quarterly' | 'semi-annually' | 'annually' | 'custom'
+  billingAmount?: number
+  billingCurrency?: string
+  notes?: string
   createdAt: Date
   updatedAt: Date
 }

@@ -19,6 +19,7 @@ export interface SessionConfig {
   color?: string
   // 服务器管理字段
   provider?: string // 提供商
+  region?: string // 地区
   expiryDate?: Date // 到期时间
   billingCycle?: 'monthly' | 'quarterly' | 'semi-annually' | 'annually' | 'custom' // 计费周期
   billingAmount?: number // 计费费用
@@ -138,7 +139,7 @@ export class SessionManager {
    * 加密会话中的敏感字段
    */
   private encryptSession(session: SessionConfig): any {
-    const sensitiveFields = ['password', 'passphrase']
+    const sensitiveFields = ['password', 'passphrase'] as (keyof SessionConfig)[]
     return credentialManager.encryptFields(session, sensitiveFields)
   }
 
@@ -146,14 +147,44 @@ export class SessionManager {
    * 解密会话中的敏感字段
    */
   private decryptSession(session: any): SessionConfig {
-    const sensitiveFields = ['password', 'passphrase']
+    const sensitiveFields = ['password', 'passphrase'] as (keyof SessionConfig)[]
     return credentialManager.decryptFields(session, sensitiveFields)
+  }
+
+  /**
+   * 自动检测区域
+   */
+  private async detectRegion(host: string): Promise<string | undefined> {
+    try {
+      // 动态引入以免影响启动速度
+      const geoip = require('geoip-lite')
+      const dns = require('dns').promises
+      const net = require('net')
+
+      let ip = host
+      // 如果不是IP，尝试解析域名
+      if (!net.isIP(host)) {
+        const res = await dns.lookup(host)
+        ip = res.address
+      }
+
+      const geo = geoip.lookup(ip)
+      return geo?.country
+    } catch (error) {
+      // 解析失败或查不到，忽略
+      return undefined
+    }
   }
 
   /**
    * 创建新会话
    */
-  createSession(config: Omit<SessionConfig, 'id' | 'createdAt' | 'updatedAt'>): SessionConfig {
+  async createSession(config: Omit<SessionConfig, 'id' | 'createdAt' | 'updatedAt'>): Promise<SessionConfig> {
+    // 如果没有指定地区，尝试根据Host自动检测
+    if (!config.region && config.host) {
+      config.region = await this.detectRegion(config.host)
+    }
+
     const now = new Date()
     const newSession: SessionConfig = {
       ...config,
@@ -163,7 +194,7 @@ export class SessionManager {
     }
 
     this.sessions.set(newSession.id, newSession)
-    this.saveSessions().catch((error) => console.error('Failed to save after create:', error))
+    await this.saveSessions()
 
     return newSession
   }
@@ -171,10 +202,18 @@ export class SessionManager {
   /**
    * 更新会话
    */
-  updateSession(id: string, updates: Partial<SessionConfig>): void {
+  async updateSession(id: string, updates: Partial<SessionConfig>): Promise<void> {
     const session = this.sessions.get(id)
     if (!session) {
       throw new Error(`Session not found: ${id}`)
+    }
+
+    // 如果当前没有地区且更新中也没指定，尝试自动检测
+    if (!updates.region && !session.region) {
+      const host = updates.host || session.host
+      if (host) {
+        updates.region = await this.detectRegion(host)
+      }
     }
 
     const updated: SessionConfig = {
@@ -186,7 +225,7 @@ export class SessionManager {
     }
 
     this.sessions.set(id, updated)
-    this.saveSessions().catch((error) => console.error('Failed to save after update:', error))
+    await this.saveSessions()
   }
 
   /**
@@ -240,7 +279,7 @@ export class SessionManager {
       throw new Error(`Group not found: ${groupId}`)
     }
 
-    this.updateSession(sessionId, { group: groupId })
+    await this.updateSession(sessionId, { group: groupId })
   }
 
   /**
@@ -282,7 +321,7 @@ export class SessionManager {
     // Ungroup all sessions in this group
     const sessions = Array.from(this.sessions.values()).filter(s => s.group === groupId)
     for (const session of sessions) {
-      this.updateSession(session.id, { group: undefined })
+      await this.updateSession(session.id, { group: undefined })
     }
 
     this.groups.delete(groupId)
@@ -337,7 +376,7 @@ export class SessionManager {
         }
 
         // 生成新的 ID 以避免冲突
-        const newSession = this.createSession({
+        const newSession = await this.createSession({
           name: session.name,
           group: session.group,
           host: session.host,
@@ -348,7 +387,13 @@ export class SessionManager {
           privateKeyPath: session.privateKeyPath,
           passphrase: session.passphrase,
           portForwards: session.portForwards,
-          color: session.color
+          color: session.color,
+          region: session.region, // Import region if exists
+          provider: session.provider,
+          expiryDate: session.expiryDate ? new Date(session.expiryDate) : undefined,
+          // ... mapping others if needed, but 'session' likely has them. 
+          // Simpler: Omit id/createdAt/updatedAt from source
+          ...(({ id, createdAt, updatedAt, ...rest }) => rest)(session as any)
         })
 
         imported.push(newSession)
