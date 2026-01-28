@@ -848,8 +848,18 @@ const checkForUpdates = async () => {
 }
 
 .settings-tabs :deep(.el-tabs__header) {
-  padding-left: var(--spacing-xl);
+  display: flex;
+  justify-content: center;
   margin: 0;
+}
+
+.settings-tabs :deep(.el-tabs__nav-wrap) {
+  display: flex;
+  justify-content: center;
+}
+
+.settings-tabs :deep(.el-tabs__nav) {
+  float: none;
 }
 
 .settings-tabs :deep(.el-tabs__content) {

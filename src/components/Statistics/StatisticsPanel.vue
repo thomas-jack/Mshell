@@ -3,6 +3,10 @@
     <div class="panel-header">
       <h2>统计分析</h2>
       <div class="header-actions">
+        <el-select v-model="displayCurrency" size="small" style="width: 100px; margin-right: 8px;">
+          <el-option label="人民币 ¥" value="CNY" />
+          <el-option label="美元 $" value="USD" />
+        </el-select>
         <el-button @click="loadData" :icon="Refresh" circle title="刷新数据" />
       </div>
     </div>
@@ -26,12 +30,9 @@
           </div>
           <div class="stat-info">
             <div class="stat-label">月度费用 (估算)</div>
-            <div class="stat-value">¥{{ totalMonthlyCost.toFixed(2) }}</div>
+            <div class="stat-value">{{ formatCurrency(totalMonthlyCost) }}</div>
             <div class="stat-sub">
-              预计年度: ¥{{ (totalMonthlyCost * 12).toFixed(2) }}
-              <el-tooltip content="汇率估算: 1 USD ≈ 7.2 CNY, 1 EUR ≈ 7.8 CNY" placement="top">
-                <el-icon class="info-icon" style="margin-left: 4px; font-size: 12px; cursor: help;"><InfoFilled /></el-icon>
-              </el-tooltip>
+              预计年度: {{ formatCurrency(totalMonthlyCost * 12) }}
             </div>
           </div>
         </div>
@@ -48,6 +49,68 @@
       </div>
 
       <div class="dashboard-grid">
+        <!-- Region Distribution -->
+        <div class="dashboard-card region-analysis">
+          <h3>主机地区分布</h3>
+          <div class="chart-container" v-if="regionStats.length > 0">
+            <div class="simple-bar-chart">
+              <div 
+                v-for="item in regionStats" 
+                :key="item.region" 
+                class="bar-item"
+              >
+                <div class="bar-label">
+                  <span>
+                    <span v-if="getRegionFlag(item.region)" v-html="getRegionFlag(item.region)" class="region-flag"></span>
+                    {{ item.region || '未知地区' }}
+                  </span>
+                  <span>{{ item.count }} 台</span>
+                </div>
+                <div class="bar-track">
+                  <div 
+                    class="bar-fill" 
+                    :style="{ width: getPercentage(item.count, totalSessions) + '%', backgroundColor: getRegionColor(item.region) }"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty-chart">
+            暂无地区数据，请编辑会话添加地区信息
+          </div>
+        </div>
+
+        <!-- Provider Statistics -->
+        <div class="dashboard-card provider-analysis">
+          <h3>服务商统计</h3>
+          <div class="chart-container" v-if="providerStats.length > 0">
+            <div class="provider-list">
+              <div 
+                v-for="item in providerStats" 
+                :key="item.provider" 
+                class="provider-item"
+              >
+                <div class="provider-header">
+                  <span class="provider-name">{{ item.provider }}</span>
+                  <span class="provider-count">{{ item.count }} 台</span>
+                </div>
+                <div class="provider-cost">
+                  月度费用: {{ formatCurrency(item.cost) }}
+                </div>
+                <div class="bar-track">
+                  <div 
+                    class="bar-fill" 
+                    :style="{ width: getPercentage(item.count, totalSessions) + '%', backgroundColor: getColor(item.provider) }"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty-chart">
+            暂无服务商数据
+          </div>
+        </div>
+
         <!-- Cost Analysis -->
         <div class="dashboard-card cost-analysis">
           <h3>服务商费用占比</h3>
@@ -60,7 +123,7 @@
               >
                 <div class="bar-label">
                   <span>{{ item.provider || '未分类' }}</span>
-                  <span>¥{{ item.cost.toFixed(2) }}</span>
+                  <span>{{ formatCurrency(item.cost) }}</span>
                 </div>
                 <div class="bar-track">
                   <div 
@@ -116,11 +179,17 @@
               {{ detectProvider(row) }}
             </template>
           </el-table-column>
+          <el-table-column prop="region" label="地区" width="120">
+            <template #default="{ row }">
+              <span v-if="getRegionFlag(row.region)" v-html="getRegionFlag(row.region)" class="region-flag-small"></span>
+              {{ row.region || '-' }}
+            </template>
+          </el-table-column>
           <el-table-column label="费用 (月)" width="150">
             <template #default="{ row }">
               <div>{{ formatAnyCost(row) }}</div>
               <div v-if="row.billingCycle !== 'monthly'" style="font-size: 10px; color: var(--text-tertiary)">
-                折合: ¥{{ getMonthlyCost(row).toFixed(1) }}/月
+                折合: {{ formatCurrency(getMonthlyCost(row)) }}/月
               </div>
             </template>
           </el-table-column>
@@ -140,8 +209,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { Monitor, Money, Timer, Refresh, InfoFilled } from '@element-plus/icons-vue'
 import type { SessionConfig } from '@/types/session'
+import * as FlagIcons from 'country-flag-icons/string/3x2'
 
 const sessions = ref<SessionConfig[]>([])
+const displayCurrency = ref<'CNY' | 'USD'>('CNY')
 
 onMounted(() => {
   loadData()
@@ -274,6 +345,94 @@ const topUsedSessions = computed(() => {
     .filter(s => (s.usageCount || 0) > 0)
 })
 
+// 地区统计
+const regionStats = computed(() => {
+  const map: Record<string, number> = {}
+  sessions.value.forEach(s => {
+    const region = s.region || '未知地区'
+    map[region] = (map[region] || 0) + 1
+  })
+  
+  return Object.entries(map)
+    .map(([region, count]) => ({ region, count }))
+    .sort((a, b) => b.count - a.count)
+})
+
+// 服务商统计（包含数量和费用）
+const providerStats = computed(() => {
+  const map: Record<string, { count: number; cost: number }> = {}
+  sessions.value.forEach(s => {
+    const provider = detectProvider(s)
+    if (!map[provider]) {
+      map[provider] = { count: 0, cost: 0 }
+    }
+    map[provider].count++
+    map[provider].cost += getMonthlyCost(s)
+  })
+  
+  return Object.entries(map)
+    .map(([provider, data]) => ({ provider, ...data }))
+    .sort((a, b) => b.count - a.count)
+})
+
+// 货币格式化
+const formatCurrency = (amount: number): string => {
+  if (displayCurrency.value === 'USD') {
+    const usdAmount = amount / 7.2 // CNY to USD
+    return `$${usdAmount.toFixed(2)}`
+  }
+  return `¥${amount.toFixed(2)}`
+}
+
+// 获取地区国旗
+const getRegionFlag = (region?: string) => {
+  if (!region) return ''
+  
+  const map: Record<string, string> = {
+    '香港': 'HK', 'Hong Kong': 'HK', 'HK': 'HK',
+    '美国': 'US', 'USA': 'US', 'US': 'US', 'Los Angeles': 'US', '洛杉矶': 'US',
+    '日本': 'JP', 'Japan': 'JP', 'JP': 'JP', 'Tokyo': 'JP', '东京': 'JP',
+    '新加坡': 'SG', 'Singapore': 'SG', 'SG': 'SG',
+    '韩国': 'KR', 'Korea': 'KR', 'KR': 'KR', 'Seoul': 'KR',
+    '中国': 'CN', 'China': 'CN', 'CN': 'CN', '上海': 'CN', '北京': 'CN',
+    '德国': 'DE', 'Germany': 'DE', 'DE': 'DE', 'Frankfurt': 'DE',
+    '英国': 'GB', 'UK': 'GB', 'GB': 'GB', 'London': 'GB',
+    '法国': 'FR', 'France': 'FR', 'FR': 'FR',
+    '俄罗斯': 'RU', 'Russia': 'RU', 'RU': 'RU',
+    '加拿大': 'CA', 'Canada': 'CA', 'CA': 'CA'
+  }
+  
+  let code = map[region] || (region.length === 2 ? region.toUpperCase() : undefined)
+  
+  if (!code) {
+    const key = Object.keys(map).find(k => region.includes(k))
+    if (key) code = map[key]
+  }
+  
+  if (code && (FlagIcons as any)[code]) {
+    return (FlagIcons as any)[code]
+  }
+  
+  return ''
+}
+
+// 地区颜色
+const getRegionColor = (region: string) => {
+  const colors: Record<string, string> = {
+    '香港': '#FF6B6B',
+    '美国': '#4ECDC4',
+    '日本': '#FFE66D',
+    '新加坡': '#95E1D3',
+    '韩国': '#F38181',
+    '中国': '#AA96DA',
+    '德国': '#FCBAD3',
+    '英国': '#A8D8EA',
+    '法国': '#FFAAA7',
+    '俄罗斯': '#C7CEEA'
+  }
+  return colors[region] || getColor(region)
+}
+
 const getPercentage = (val: number, total: number) => {
   if (total === 0) return 0
   return Math.min(100, (val / total) * 100)
@@ -336,6 +495,12 @@ defineExpose({ loadData })
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
 }
 
 .stats-content {
@@ -487,4 +652,85 @@ defineExpose({ loadData })
     grid-template-columns: 1fr;
   }
 }
+
+/* Region Flag */
+.region-flag {
+  display: inline-block;
+  width: 20px;
+  height: 15px;
+  margin-right: 6px;
+  border-radius: 2px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.region-flag :deep(svg) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.region-flag-small {
+  display: inline-block;
+  width: 16px;
+  height: 12px;
+  margin-right: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.region-flag-small :deep(svg) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Provider List */
+.provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.provider-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+}
+
+.provider-item:hover {
+  background: var(--bg-elevated);
+  transform: translateX(4px);
+}
+
+.provider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.provider-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.provider-count {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.provider-cost {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
 </style>

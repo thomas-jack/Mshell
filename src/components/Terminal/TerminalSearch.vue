@@ -7,29 +7,26 @@
       clearable
       @keyup.enter="findNext"
       @keyup.shift.enter="findPrevious"
+      class="search-input"
     >
       <template #prepend>
         <el-icon><Search /></el-icon>
       </template>
-      <template #append>
-        <div class="search-actions">
-          <el-button size="small" text @click="findPrevious" title="上一个 (Shift+Enter)">
-            <el-icon><ArrowUp /></el-icon>
-          </el-button>
-          <el-button size="small" text @click="findNext" title="下一个 (Enter)">
-            <el-icon><ArrowDown /></el-icon>
-          </el-button>
-          <el-checkbox v-model="caseSensitive" size="small">区分大小写</el-checkbox>
-          <el-checkbox v-model="useRegex" size="small">正则表达式</el-checkbox>
-          <el-button size="small" text @click="close">
-            <el-icon><Close /></el-icon>
-          </el-button>
-        </div>
-      </template>
     </el-input>
+    <el-button size="small" text @click="findPrevious" title="上一个 (Shift+Enter)">
+      <el-icon><ArrowUp /></el-icon>
+    </el-button>
+    <el-button size="small" text @click="findNext" title="下一个 (Enter)">
+      <el-icon><ArrowDown /></el-icon>
+    </el-button>
+    <el-checkbox v-model="caseSensitive" size="small">Aa</el-checkbox>
+    <el-checkbox v-model="useRegex" size="small">.*</el-checkbox>
     <span v-if="matchCount !== null" class="match-count">
       {{ currentMatch }}/{{ matchCount }}
     </span>
+    <el-button size="small" text @click="close">
+      <el-icon><Close /></el-icon>
+    </el-button>
   </div>
 </template>
 
@@ -105,32 +102,62 @@ defineExpose({
 <style scoped>
 .terminal-search {
   position: absolute;
-  top: 8px;
+  top: 52px;
   right: 8px;
   z-index: 100;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.search-actions {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-.match-count {
-  font-size: 12px;
-  color: #858585;
   white-space: nowrap;
 }
 
-:deep(.el-input__inner) {
-  min-width: 300px;
+.search-input {
+  width: 180px;
+  flex-shrink: 0;
+}
+
+/* 按钮样式优化 */
+.terminal-search :deep(.el-button) {
+  padding: 4px;
+  margin: 0;
+}
+
+.match-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  padding: 0 4px;
+  min-width: 40px;
+  text-align: center;
+}
+
+/* 复选框样式优化 */
+.terminal-search :deep(.el-checkbox) {
+  margin-right: 0;
+}
+
+.terminal-search :deep(.el-checkbox__label) {
+  padding-left: 4px;
+  font-size: 12px;
+  font-family: monospace;
+  font-weight: 600;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .terminal-search {
+    top: 48px;
+    right: 4px;
+    flex-wrap: wrap;
+  }
+
+  .search-input {
+    width: 150px;
+  }
 }
 </style>

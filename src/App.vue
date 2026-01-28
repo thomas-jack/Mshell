@@ -588,7 +588,7 @@ body,
   color: var(--text-secondary);
   font-size: var(--text-sm);
   font-weight: 500;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
   background: transparent;
   position: relative;
   margin-right: 4px;

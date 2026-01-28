@@ -679,13 +679,14 @@ const handleRenameGroup = () => {
 .session-items {
   display: flex;
   flex-direction: column;
-  gap: 4px; /* 减小间距 */
+  gap: 8px;
+  padding-top: 8px; /* 增加分类名称和会话之间的间隔 */
 }
 
 .session-card {
   display: flex;
-  align-items: flex-start; /* 顶部对齐 */
-  padding: 10px 12px; /* 减小内边距 */
+  align-items: center; /* 改为居中对齐，让状态点垂直居中 */
+  padding: 10px 12px;
   background: var(--bg-tertiary);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -815,8 +816,10 @@ const handleRenameGroup = () => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  align-self: flex-start; /* 改为顶部对齐 */
   gap: 4px;
   margin-left: 8px;
+  padding-top: 2px; /* 微调顶部间距 */
 }
 
 /* 到期信息 */

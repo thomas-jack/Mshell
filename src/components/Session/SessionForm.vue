@@ -189,26 +189,66 @@ const formRef = ref<FormInstance>()
 const isEdit = ref(false)
 
 const countryOptions = [
+  // 亚洲
   { label: '中国 (China)', value: 'CN' },
   { label: '中国香港 (Hong Kong)', value: 'HK' },
+  { label: '中国澳门 (Macau)', value: 'MO' },
   { label: '中国台湾 (Taiwan)', value: 'TW' },
-  { label: '美国 (USA)', value: 'US' },
   { label: '日本 (Japan)', value: 'JP' },
-  { label: '新加坡 (Singapore)', value: 'SG' },
   { label: '韩国 (Korea)', value: 'KR' },
-  { label: '俄罗斯 (Russia)', value: 'RU' },
-  { label: '德国 (Germany)', value: 'DE' },
-  { label: '英国 (UK)', value: 'GB' },
-  { label: '法国 (France)', value: 'FR' },
-  { label: '加拿大 (Canada)', value: 'CA' },
-  { label: '澳大利亚 (Australia)', value: 'AU' },
-  { label: '印度 (India)', value: 'IN' },
-  { label: '巴西 (Brazil)', value: 'BR' },
-  { label: '荷兰 (Netherlands)', value: 'NL' },
+  { label: '新加坡 (Singapore)', value: 'SG' },
   { label: '马来西亚 (Malaysia)', value: 'MY' },
   { label: '泰国 (Thailand)', value: 'TH' },
   { label: '越南 (Vietnam)', value: 'VN' },
-  { label: '印度尼西亚 (Indonesia)', value: 'ID' }
+  { label: '印度尼西亚 (Indonesia)', value: 'ID' },
+  { label: '菲律宾 (Philippines)', value: 'PH' },
+  { label: '印度 (India)', value: 'IN' },
+  { label: '巴基斯坦 (Pakistan)', value: 'PK' },
+  { label: '孟加拉国 (Bangladesh)', value: 'BD' },
+  { label: '以色列 (Israel)', value: 'IL' },
+  { label: '土耳其 (Turkey)', value: 'TR' },
+  { label: '阿联酋 (UAE)', value: 'AE' },
+  { label: '沙特阿拉伯 (Saudi Arabia)', value: 'SA' },
+
+  // 欧洲
+  { label: '英国 (UK)', value: 'GB' },
+  { label: '德国 (Germany)', value: 'DE' },
+  { label: '法国 (France)', value: 'FR' },
+  { label: '荷兰 (Netherlands)', value: 'NL' },
+  { label: '瑞士 (Switzerland)', value: 'CH' },
+  { label: '瑞典 (Sweden)', value: 'SE' },
+  { label: '挪威 (Norway)', value: 'NO' },
+  { label: '芬兰 (Finland)', value: 'FI' },
+  { label: '丹麦 (Denmark)', value: 'DK' },
+  { label: '意大利 (Italy)', value: 'IT' },
+  { label: '西班牙 (Spain)', value: 'ES' },
+  { label: '葡萄牙 (Portugal)', value: 'PT' },
+  { label: '波兰 (Poland)', value: 'PL' },
+  { label: '俄罗斯 (Russia)', value: 'RU' },
+  { label: '乌克兰 (Ukraine)', value: 'UA' },
+  { label: '爱尔兰 (Ireland)', value: 'IE' },
+  { label: '比利时 (Belgium)', value: 'BE' },
+  { label: '奥地利 (Austria)', value: 'AT' },
+
+  // 北美洲
+  { label: '美国 (USA)', value: 'US' },
+  { label: '加拿大 (Canada)', value: 'CA' },
+  { label: '墨西哥 (Mexico)', value: 'MX' },
+
+  // 南美洲
+  { label: '巴西 (Brazil)', value: 'BR' },
+  { label: '阿根廷 (Argentina)', value: 'AR' },
+  { label: '智利 (Chile)', value: 'CL' },
+  { label: '哥伦比亚 (Colombia)', value: 'CO' },
+
+  // 大洋洲
+  { label: '澳大利亚 (Australia)', value: 'AU' },
+  { label: '新西兰 (New Zealand)', value: 'NZ' },
+
+  // 非洲
+  { label: '南非 (South Africa)', value: 'ZA' },
+  { label: '埃及 (Egypt)', value: 'EG' },
+  { label: '尼日利亚 (Nigeria)', value: 'NG' }
 ]
 
 const defaultForm = {

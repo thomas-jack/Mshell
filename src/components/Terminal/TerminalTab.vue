@@ -250,6 +250,10 @@ const snippets = ref<CommandSnippet[]>([])
 const selectedSnippet = ref<CommandSnippet | null>(null)
 const variableValues = ref<Record<string, string>>({})
 
+// 搜索相关状态
+const currentSearchTerm = ref('')
+const currentSearchOptions = ref({ caseSensitive: false, regex: false })
+
 // 主题相关
 const availableThemes = themes
 const currentTheme = computed(() => props.terminalOptions?.theme || 'dark')
@@ -394,20 +398,22 @@ const handleThemeChange = async (themeName: string) => {
 }
 
 const handleSearch = (term: string, options: { caseSensitive: boolean; regex: boolean }) => {
+  currentSearchTerm.value = term
+  currentSearchOptions.value = options
   if (terminalRef.value) {
     terminalRef.value.search(term, options)
   }
 }
 
 const handleFindNext = () => {
-  if (terminalRef.value) {
-    terminalRef.value.findNext()
+  if (terminalRef.value && currentSearchTerm.value) {
+    terminalRef.value.findNext(currentSearchTerm.value, currentSearchOptions.value)
   }
 }
 
 const handleFindPrevious = () => {
-  if (terminalRef.value) {
-    terminalRef.value.findPrevious()
+  if (terminalRef.value && currentSearchTerm.value) {
+    terminalRef.value.findPrevious(currentSearchTerm.value, currentSearchOptions.value)
   }
 }
 
@@ -603,13 +609,27 @@ defineExpose({
 
 .header-actions {
   display: flex;
-  gap: 4px;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 确保下拉菜单和按钮宽度一致 */
+.header-actions :deep(.el-dropdown) {
+  display: inline-flex;
+}
+
+.header-actions :deep(.el-dropdown .el-button) {
+  padding: 2px !important;
+  height: 20px !important;
+  width: 20px !important;
+  min-width: 20px !important;
 }
 
 .action-btn {
-  padding: 4px;
-  height: 24px;
-  width: 24px;
+  padding: 2px !important;
+  height: 20px !important;
+  width: 20px !important;
+  min-width: 20px !important;
   border-radius: 4px;
   color: var(--text-secondary);
 }

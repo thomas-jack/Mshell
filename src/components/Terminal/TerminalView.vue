@@ -349,20 +349,29 @@ defineExpose({
   },
   search: (term: string, options?: { caseSensitive?: boolean; regex?: boolean }) => {
     if (searchAddon) {
+      // 清除之前的搜索高亮
+      searchAddon.clearDecorations()
+      // 从头开始搜索
       searchAddon.findNext(term, {
         caseSensitive: options?.caseSensitive,
         regex: options?.regex
       })
     }
   },
-  findNext: (term: string) => {
+  findNext: (term: string, options?: { caseSensitive?: boolean; regex?: boolean }) => {
     if (searchAddon) {
-      searchAddon.findNext(term)
+      searchAddon.findNext(term, {
+        caseSensitive: options?.caseSensitive,
+        regex: options?.regex
+      })
     }
   },
-  findPrevious: (term: string) => {
+  findPrevious: (term: string, options?: { caseSensitive?: boolean; regex?: boolean }) => {
     if (searchAddon) {
-      searchAddon.findPrevious(term)
+      searchAddon.findPrevious(term, {
+        caseSensitive: options?.caseSensitive,
+        regex: options?.regex
+      })
     }
   },
   fit: () => {
@@ -387,5 +396,16 @@ defineExpose({
 
 .terminal-container :deep(.xterm-viewport) {
   overflow-y: auto;
+}
+
+/* 搜索高亮样式 */
+.terminal-container :deep(.xterm-search-result) {
+  background-color: rgba(255, 255, 0, 0.4) !important;
+  color: inherit !important;
+}
+
+.terminal-container :deep(.xterm-search-result-active) {
+  background-color: rgba(255, 165, 0, 0.6) !important;
+  color: inherit !important;
 }
 </style>
