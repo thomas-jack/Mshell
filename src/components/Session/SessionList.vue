@@ -84,12 +84,10 @@
                     <el-icon :size="12"><Monitor /></el-icon>
                     {{ session.host }}
                   </span>
-
                 </div>
               </div>
               
               <div class="session-actions-wrapper">
-                <!-- 到期信息 -->
                 <div v-if="session.expiryDate" class="expiry-info">
                   <el-tag 
                     :type="getExpiryTagType(session.expiryDate)" 
@@ -161,7 +159,6 @@
               </div>
               
               <div class="session-actions-wrapper">
-                <!-- 到期信息 -->
                 <div v-if="session.expiryDate" class="expiry-info">
                   <el-tag 
                     :type="getExpiryTagType(session.expiryDate)" 
@@ -248,7 +245,7 @@
       <el-select v-model="moveGroupId" placeholder="选择分组" style="width: 100%">
         <el-option label="未分组" value="" />
         <el-option
-          v-for="group in groups"
+          v-for="group in appStore.groups"
           :key="group.id"
           :label="group.name"
           :value="group.id"
@@ -262,29 +259,23 @@
   </div>
 </template>
 
+
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { 
   Search, Connection, FolderAdd, Folder, Files, User, Monitor 
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useAppStore } from '@/stores/app'
 import type { SessionConfig, SessionGroup } from '@/types/session'
+import * as FlagIcons from 'country-flag-icons/string/3x2'
 
-interface Props {
-  sessions: SessionConfig[]
-  groups: SessionGroup[]
-}
-
-const props = defineProps<Props>()
+// 使用 store - 不需要 props!
+const appStore = useAppStore()
 
 const emit = defineEmits<{
   connect: [session: SessionConfig]
   edit: [session: SessionConfig]
-  contextMenu: [session: SessionConfig, event: MouseEvent]
-  createGroup: [group: { name: string; description?: string }]
-  renameGroup: [groupId: string, newName: string]
-  deleteGroup: [groupId: string]
-  refresh: []
 }>()
 
 const searchQuery = ref('')
@@ -301,11 +292,12 @@ const groupForm = ref({
   description: ''
 })
 
+// 计算属性 - 直接从 store 获取数据
 const filteredSessions = computed(() => {
-  if (!searchQuery.value) return props.sessions
+  if (!searchQuery.value) return appStore.sessions
   
   const query = searchQuery.value.toLowerCase()
-  return props.sessions.filter(
+  return appStore.sessions.filter(
     (session) =>
       session.name.toLowerCase().includes(query) ||
       session.host.toLowerCase().includes(query) ||
@@ -314,19 +306,19 @@ const filteredSessions = computed(() => {
 })
 
 const filteredGroups = computed(() => {
-  return props.groups
+  return appStore.groups
 })
 
 const ungroupedSessions = computed(() => {
   const groupedSessionIds = new Set<string>()
-  props.groups.forEach(group => {
+  appStore.groups.forEach(group => {
     group.sessions.forEach(sid => groupedSessionIds.add(sid))
   })
   return filteredSessions.value.filter((session) => !groupedSessionIds.has(session.id))
 })
 
 const getGroupSessions = (groupId: string) => {
-  const group = props.groups.find(g => g.id === groupId)
+  const group = appStore.groups.find(g => g.id === groupId)
   if (!group) return []
   
   const sessionIds = new Set(group.sessions)
@@ -349,10 +341,8 @@ const handleDelete = async (session: SessionConfig) => {
       }
     )
 
-    await window.electronAPI.session.delete(session.id)
+    await appStore.deleteSession(session.id)
     ElMessage.success('会话已删除')
-    // 重新加载会话列表
-    emit('refresh')
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(`删除失败: ${error.message}`)
@@ -393,9 +383,8 @@ const handleCopy = async (session: SessionConfig) => {
       ...rest,
       name: `${session.name} (副本)`,
     }
-    await window.electronAPI.session.create(newSession)
+    await appStore.createSession(newSession)
     ElMessage.success('会话已复制')
-    emit('refresh')
   } catch (err: any) {
     ElMessage.error(err.message)
   }
@@ -410,18 +399,16 @@ const handleMove = (session: SessionConfig) => {
 const confirmMove = async () => {
   if (!movingSession.value) return
   try {
-    await window.electronAPI.session.update(movingSession.value.id, { 
+    await appStore.updateSession(movingSession.value.id, { 
       group: moveGroupId.value || undefined 
     }) 
     ElMessage.success('移动成功')
-    emit('refresh')
     showMoveDialog.value = false
   } catch (err: any) {
     ElMessage.error(err.message)
   }
 }
 
-// 计算到期时间文本和标签类型
 const getExpiryText = (expiryDate: Date | string): string => {
   const expiry = new Date(expiryDate)
   const now = new Date()
@@ -450,25 +437,19 @@ const getExpiryTagType = (expiryDate: Date | string): 'success' | 'warning' | 'd
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
   
   if (diffMs < 0) {
-    return 'danger' // 已过期
+    return 'danger'
   } else if (diffDays <= 7) {
-    return 'danger' // 7天内
+    return 'danger'
   } else if (diffDays <= 30) {
-    return 'warning' // 30天内
+    return 'warning'
   } else {
-    return 'success' // 30天以上
+    return 'success'
   }
 }
-
-// ... imports
-import * as FlagIcons from 'country-flag-icons/string/3x2'
-
-// ... existing code
 
 const getRegionFlag = (region?: string) => {
   if (!region) return ''
   
-  // Simple mapping for common inputs
   const map: Record<string, string> = {
     '香港': 'HK', 'Hong Kong': 'HK', 'HK': 'HK',
     '美国': 'US', 'USA': 'US', 'US': 'US', 'Los Angeles': 'US', '洛杉矶': 'US',
@@ -483,10 +464,8 @@ const getRegionFlag = (region?: string) => {
     '加拿大': 'CA', 'Canada': 'CA', 'CA': 'CA'
   }
   
-  // Try direct match or exact code match
   let code = map[region] || (region.length === 2 ? region.toUpperCase() : undefined)
   
-  // Try fuzzy search if no exact match
   if (!code) {
     const key = Object.keys(map).find(k => region.includes(k))
     if (key) code = map[key]
@@ -499,19 +478,20 @@ const getRegionFlag = (region?: string) => {
   return ''
 }
 
-const handleCreateGroup = () => {
+const handleCreateGroup = async () => {
   if (!groupForm.value.name.trim()) {
     ElMessage.warning('请输入分组名称')
     return
   }
   
-  emit('createGroup', {
-    name: groupForm.value.name,
-    description: groupForm.value.description || undefined
-  })
-  
-  groupForm.value = { name: '', description: '' }
-  showGroupDialog.value = false
+  try {
+    await appStore.createGroup(groupForm.value.name, groupForm.value.description || undefined)
+    ElMessage.success('分组已创建')
+    groupForm.value = { name: '', description: '' }
+    showGroupDialog.value = false
+  } catch (error: any) {
+    ElMessage.error(`创建分组失败: ${error.message}`)
+  }
 }
 
 const handleGroupContextMenu = async (group: SessionGroup, event: MouseEvent) => {
@@ -536,25 +516,32 @@ const handleGroupContextMenu = async (group: SessionGroup, event: MouseEvent) =>
         : `确定删除分组 "${group.name}" 吗？`
       
       await ElMessageBox.confirm(message, '确认删除', { type: 'warning' })
-      emit('deleteGroup', group.id)
+      await appStore.deleteGroup(group.id)
+      ElMessage.success('分组已删除')
     }
   } catch (error) {
     // 用户取消
   }
 }
 
-const handleRenameGroup = () => {
+const handleRenameGroup = async () => {
   if (!renameGroupName.value.trim() || !currentGroup.value) {
     ElMessage.warning('请输入分组名称')
     return
   }
   
-  emit('renameGroup', currentGroup.value.id, renameGroupName.value)
-  showRenameDialog.value = false
-  currentGroup.value = null
-  renameGroupName.value = ''
+  try {
+    await appStore.renameGroup(currentGroup.value.id, renameGroupName.value)
+    ElMessage.success('分组已重命名')
+    showRenameDialog.value = false
+    currentGroup.value = null
+    renameGroupName.value = ''
+  } catch (error: any) {
+    ElMessage.error(`重命名失败: ${error.message}`)
+  }
 }
 </script>
+
 
 <style scoped>
 .session-list {
@@ -565,7 +552,6 @@ const handleRenameGroup = () => {
   transition: background-color var(--transition-normal);
 }
 
-/* 头部区域 */
 .session-list-header {
   padding: var(--spacing-lg) var(--spacing-md);
   border-bottom: 1px solid var(--border-light);
@@ -591,14 +577,12 @@ const handleRenameGroup = () => {
   position: relative;
 }
 
-/* 会话列表容器 */
 .session-groups-container {
   flex: 1;
   overflow-y: auto;
   padding: var(--spacing-sm);
 }
 
-/* 折叠面板样式 */
 .session-collapse {
   border: none;
   --el-collapse-header-bg-color: transparent;
@@ -649,7 +633,6 @@ const handleRenameGroup = () => {
   transition: transform var(--transition-normal);
 }
 
-/* 分组头部 */
 .group-header {
   display: flex;
   align-items: center;
@@ -675,17 +658,16 @@ const handleRenameGroup = () => {
   font-size: var(--text-sm);
 }
 
-/* 会话卡片 */
 .session-items {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-top: 8px; /* 增加分类名称和会话之间的间隔 */
+  padding-top: 8px;
 }
 
 .session-card {
   display: flex;
-  align-items: center; /* 改为居中对齐，让状态点垂直居中 */
+  align-items: center;
   padding: 10px 12px;
   background: var(--bg-tertiary);
   border: 1px solid transparent;
@@ -723,13 +705,12 @@ const handleRenameGroup = () => {
   transform: translateX(2px);
 }
 
-/* 状态指示器 */
 .session-status {
-  margin-right: 8px; /* 减小间距 */
+  margin-right: 8px;
 }
 
 .status-dot {
-  width: 6px; /* 减小尺寸 */
+  width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--text-tertiary);
@@ -741,16 +722,15 @@ const handleRenameGroup = () => {
   box-shadow: 0 0 8px var(--success-color);
 }
 
-/* 会话图标 */
 .session-icon {
-  width: 32px; /* 减小尺寸 */
+  width: 32px;
   height: 32px;
   background: var(--bg-main);
-  border-radius: var(--radius-sm); /* 减小圆角 */
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 10px; /* 减小间距 */
+  margin-right: 10px;
   color: var(--text-secondary);
   transition: all var(--transition-fast);
   flex-shrink: 0;
@@ -784,16 +764,14 @@ const handleRenameGroup = () => {
   display: block;
 }
 
-/* 会话内容 */
 .session-content {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px; /* 减小间距 */
+  gap: 2px;
 }
 
-/* 会话名称行 */
 .session-name-row {
   display: flex;
   align-items: center;
@@ -811,18 +789,16 @@ const handleRenameGroup = () => {
   line-height: 1.3;
 }
 
-/* 操作区域包装器 */
 .session-actions-wrapper {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  align-self: flex-start; /* 改为顶部对齐 */
+  align-self: flex-start;
   gap: 4px;
   margin-left: 8px;
-  padding-top: 2px; /* 微调顶部间距 */
+  padding-top: 2px;
 }
 
-/* 到期信息 */
 .expiry-info {
   display: flex;
   justify-content: flex-end;
@@ -851,50 +827,10 @@ const handleRenameGroup = () => {
   gap: 4px;
 }
 
-.detail-flag {
-  display: inline-flex;
-  width: 16px;
-  height: 12px;
-  margin-left: 6px;
-  border-radius: 2px;
-  overflow: hidden;
-  vertical-align: middle;
+.detail-separator {
+  color: var(--text-disabled);
 }
 
-.large-flag {
-  width: 20px;
-  height: 15px;
-  margin-left: 0;
-  border-radius: 3px;
-}
-
-.region-flag-wrapper {
-  margin-bottom: 4px; /* Flag gap */
-  display: flex;
-  justify-content: flex-end;
-}
-
-.detail-flag :deep(svg) {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-/* 会话操作 */
-.session-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-
-.session-card:hover .session-actions {
-  opacity: 1;
-}
-
-/* 空状态 */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -924,14 +860,13 @@ const handleRenameGroup = () => {
   margin: 0;
 }
 
-/* 响应式 */
 @media (max-width: 768px) {
   .session-list-header {
     padding: var(--spacing-md) var(--spacing-sm);
   }
   
   .session-card {
-    padding: 8px 10px; /* 移动端更紧凑 */
+    padding: 8px 10px;
   }
   
   .session-icon {
@@ -940,7 +875,6 @@ const handleRenameGroup = () => {
   }
 }
 
-/* 动画 */
 .session-card {
   animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1) backwards;
 }

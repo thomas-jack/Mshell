@@ -77,9 +77,9 @@
       <el-form :model="form" :rules="rules" ref="formRef" label-width="120px">
         <el-form-item label="转发类型" prop="type">
           <el-radio-group v-model="form.type">
-            <el-radio label="local">本地转发</el-radio>
-            <el-radio label="remote">远程转发</el-radio>
-            <el-radio label="dynamic">动态转发</el-radio>
+            <el-radio value="local">本地转发</el-radio>
+            <el-radio value="remote">远程转发</el-radio>
+            <el-radio value="dynamic">动态转发</el-radio>
           </el-radio-group>
           <div class="form-help">
             <div v-if="form.type === 'local'">

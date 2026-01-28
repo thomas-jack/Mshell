@@ -23,8 +23,8 @@
 
       <el-form-item label="认证方式" prop="authType">
         <el-radio-group v-model="form.authType">
-          <el-radio label="password">密码</el-radio>
-          <el-radio label="privateKey">私钥</el-radio>
+          <el-radio value="password">密码</el-radio>
+          <el-radio value="privateKey">私钥</el-radio>
         </el-radio-group>
       </el-form-item>
 
@@ -65,7 +65,7 @@
       <el-form-item label="分组" prop="groupId">
         <el-select v-model="form.groupId" placeholder="选择分组" clearable>
           <el-option
-            v-for="group in groups"
+            v-for="group in appStore.groups"
             :key="group.id"
             :label="group.name"
             :value="group.id"
@@ -169,12 +169,12 @@
 <script setup lang="ts">
 import { ref, reactive, watch } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
-import type { SessionConfig, SessionGroup } from '@/types/session'
+import { useAppStore } from '@/stores/app'
+import type { SessionConfig } from '@/types/session'
 
 interface Props {
   modelValue: boolean
   session?: SessionConfig | null
-  groups: SessionGroup[]
 }
 
 const props = defineProps<Props>()
@@ -183,6 +183,9 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   save: [session: Partial<SessionConfig>]
 }>()
+
+// 使用 store 获取 groups
+const appStore = useAppStore()
 
 const visible = ref(props.modelValue)
 const formRef = ref<FormInstance>()

@@ -151,7 +151,16 @@ onMounted(() => {
 
 const loadLogs = async () => {
   try {
-    const result = await window.electronAPI.log.getLogs(filter.value)
+    const hasFilter = filter.value.startDate || filter.value.endDate || filter.value.host || filter.value.level
+    
+    const filterParam = hasFilter ? {
+      startDate: filter.value.startDate ? filter.value.startDate.toISOString() : undefined,
+      endDate: filter.value.endDate ? filter.value.endDate.toISOString() : undefined,
+      host: filter.value.host || undefined,
+      level: filter.value.level || undefined
+    } : undefined
+    
+    const result = await window.electronAPI.log.getLogs(filterParam)
     logs.value = result
   } catch (error) {
     console.error('Failed to load logs:', error)

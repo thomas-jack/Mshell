@@ -29,9 +29,9 @@
 
       <el-form-item label="Cursor Style">
         <el-radio-group v-model="settings.cursorStyle">
-          <el-radio label="block">Block</el-radio>
-          <el-radio label="underline">Underline</el-radio>
-          <el-radio label="bar">Bar</el-radio>
+          <el-radio value="block">Block</el-radio>
+          <el-radio value="underline">Underline</el-radio>
+          <el-radio value="bar">Bar</el-radio>
         </el-radio-group>
       </el-form-item>
 
@@ -50,9 +50,9 @@
 
       <el-form-item label="Renderer">
         <el-radio-group v-model="settings.rendererType">
-          <el-radio label="webgl">WebGL (Fastest)</el-radio>
-          <el-radio label="canvas">Canvas</el-radio>
-          <el-radio label="dom">DOM</el-radio>
+          <el-radio value="webgl">WebGL (Fastest)</el-radio>
+          <el-radio value="canvas">Canvas</el-radio>
+          <el-radio value="dom">DOM</el-radio>
         </el-radio-group>
       </el-form-item>
 

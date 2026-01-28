@@ -4,7 +4,7 @@ import { app } from 'electron'
 
 export interface LogEntry {
   id: string
-  timestamp: Date
+  timestamp: string | Date
   level: 'info' | 'warn' | 'error'
   category: 'connection' | 'sftp' | 'system' | 'session'
   sessionId?: string
@@ -132,11 +132,11 @@ class Logger {
       for (const line of lines) {
         try {
           const entry: LogEntry = JSON.parse(line)
-          entry.timestamp = new Date(entry.timestamp)
+          const entryDate = new Date(entry.timestamp)
 
           if (filter) {
-            if (filter.startDate && entry.timestamp < filter.startDate) continue
-            if (filter.endDate && entry.timestamp > filter.endDate) continue
+            if (filter.startDate && entryDate < filter.startDate) continue
+            if (filter.endDate && entryDate > filter.endDate) continue
             if (filter.host && entry.host !== filter.host) continue
             if (filter.level && entry.level !== filter.level) continue
           }
@@ -148,7 +148,7 @@ class Logger {
       }
     }
 
-    return logs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   }
 }
 

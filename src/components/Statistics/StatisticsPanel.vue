@@ -7,7 +7,7 @@
           <el-option label="人民币 ¥" value="CNY" />
           <el-option label="美元 $" value="USD" />
         </el-select>
-        <el-button @click="loadData" :icon="Refresh" circle title="刷新数据" />
+        <el-button @click="appStore.loadSessions()" :icon="Refresh" circle title="刷新数据" />
       </div>
     </div>
 
@@ -171,7 +171,7 @@
       <!-- Detailed Table -->
       <div class="dashboard-card detailed-stats">
         <h3>会话详情</h3>
-        <el-table :data="sessions" style="width: 100%" height="300">
+        <el-table :data="appStore.sessions" style="width: 100%" height="300">
           <el-table-column prop="name" label="名称" min-width="150" />
           <el-table-column prop="host" label="主机" min-width="150" />
           <el-table-column prop="provider" label="服务商" width="120">
@@ -206,43 +206,54 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { Monitor, Money, Timer, Refresh, InfoFilled } from '@element-plus/icons-vue'
-import type { SessionConfig } from '@/types/session'
+import { ref, computed } from 'vue'
+import { Monitor, Money, Timer, Refresh } from '@element-plus/icons-vue'
+import { useAppStore } from '@/stores/app'
 import * as FlagIcons from 'country-flag-icons/string/3x2'
 
-const sessions = ref<SessionConfig[]>([])
+// 使用 store - 不需要重复加载数据！
+const appStore = useAppStore()
+
 const displayCurrency = ref<'CNY' | 'USD'>('CNY')
 
-onMounted(() => {
-  loadData()
+// 直接从 store 计算统计数据
+const totalSessions = computed(() => appStore.sessions.length)
+
+const totalUsage = computed(() => {
+  return appStore.sessions.reduce((acc, curr) => acc + (curr.usageCount || 0), 0)
 })
 
-const loadData = async () => {
-  try {
-    sessions.value = await window.electronAPI.session.getAll()
-  } catch (error) {
-    console.error('Failed to load sessions for stats:', error)
+const totalMonthlyCost = computed(() => {
+  return appStore.sessions.reduce((acc, curr) => acc + getMonthlyCost(curr), 0)
+})
+
+const getMonthlyCost = (session: any): number => {
+  if (!session.billingAmount) return 0
+  let amount = Number(session.billingAmount)
+  if (isNaN(amount)) return 0
+  
+  const currency = (session.billingCurrency || 'CNY').toUpperCase()
+  if (currency === 'USD') amount *= 7.2
+  else if (currency === 'EUR') amount *= 7.8
+  
+  const cycle = session.billingCycle || 'monthly'
+  switch (cycle) {
+    case 'monthly': return amount
+    case 'quarterly': return amount / 3
+    case 'semi-annually': return amount / 6
+    case 'annually': return amount / 12
+    case 'biennially': return amount / 24
+    case 'triennially': return amount / 36
+    case 'custom': return 0
+    default: return amount
   }
 }
 
-const totalSessions = computed(() => sessions.value.length)
-
-const totalUsage = computed(() => {
-  return sessions.value.reduce((acc, curr) => acc + (curr.usageCount || 0), 0)
-})
-
 const maxUsage = computed(() => {
-  return Math.max(...sessions.value.map(s => s.usageCount || 0), 1) // Avoid div by zero
+  return Math.max(...appStore.sessions.map(s => s.usageCount || 0), 1)
 })
 
-// ... imports
-
-// ... loadData
-
-// ... totals
-
-const detectProvider = (session: SessionConfig): string => {
+const detectProvider = (session: any): string => {
   const keywords: Record<string, string[]> = {
     '阿里云 (Aliyun)': ['aliyun', '阿里云', 'ali'],
     '腾讯云 (Tencent)': ['tencent', 'qcloud', '腾讯云'],
@@ -283,49 +294,9 @@ const detectProvider = (session: SessionConfig): string => {
   return findCanonical(text) || '未分类'
 }
 
-const getMonthlyCost = (session: SessionConfig): number => {
-  // Ensure we have a valid amount
-  if (session.billingAmount === undefined || session.billingAmount === null || session.billingAmount === ('' as any)) return 0
-  
-  // Force convert to number to be safe (handle potential commas)
-  let valStr = String(session.billingAmount).replace(',', '.')
-  let amount = Number(valStr)
-  if (isNaN(amount)) return 0
-
-  // Convert based on currency
-  const currency = (session.billingCurrency || 'CNY').toUpperCase()
-  
-  /* 
-   * Simple Currency Conversion
-   * 1 USD ≈ 7.2 CNY
-   * 1 EUR ≈ 7.8 CNY
-   */
-  if (currency === 'USD') amount *= 7.2
-  else if (currency === 'EUR') amount *= 7.8
-  
-  // Convert based on cycle
-  // If billingCycle is missing/empty, imply 'monthly' as per typical SaaS/Cloud default
-  const cycle = session.billingCycle || 'monthly'
-  
-  switch (cycle) {
-    case 'monthly': return amount
-    case 'quarterly': return amount / 3
-    case 'semi-annually': return amount / 6
-    case 'annually': return amount / 12
-    case 'biennially': return amount / 24
-    case 'triennially': return amount / 36
-    case 'custom': return 0 // Cannot calculate monthly cost for custom/unknown
-    default: return amount // Default to monthly if unknown string
-  }
-}
-
-const totalMonthlyCost = computed(() => {
-  return sessions.value.reduce((acc, curr) => acc + getMonthlyCost(curr), 0)
-})
-
 const providerCosts = computed(() => {
   const map: Record<string, number> = {}
-  sessions.value.forEach(s => {
+  appStore.sessions.forEach(s => {
     const cost = getMonthlyCost(s)
     if (cost > 0) {
       const provider = detectProvider(s)
@@ -339,16 +310,15 @@ const providerCosts = computed(() => {
 })
 
 const topUsedSessions = computed(() => {
-  return [...sessions.value]
+  return [...appStore.sessions]
     .sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0))
     .slice(0, 5)
     .filter(s => (s.usageCount || 0) > 0)
 })
 
-// 地区统计
 const regionStats = computed(() => {
   const map: Record<string, number> = {}
-  sessions.value.forEach(s => {
+  appStore.sessions.forEach(s => {
     const region = s.region || '未知地区'
     map[region] = (map[region] || 0) + 1
   })
@@ -358,10 +328,9 @@ const regionStats = computed(() => {
     .sort((a, b) => b.count - a.count)
 })
 
-// 服务商统计（包含数量和费用）
 const providerStats = computed(() => {
   const map: Record<string, { count: number; cost: number }> = {}
-  sessions.value.forEach(s => {
+  appStore.sessions.forEach(s => {
     const provider = detectProvider(s)
     if (!map[provider]) {
       map[provider] = { count: 0, cost: 0 }
@@ -476,8 +445,8 @@ const formatDate = (date?: Date | string) => {
   })
 }
 
-// Re-expose loadData to parent if needed
-defineExpose({ loadData })
+// Re-expose loadData to parent if needed (now just calls store method)
+defineExpose({ loadData: () => appStore.loadSessions() })
 </script>
 
 <style scoped>

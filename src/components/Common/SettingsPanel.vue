@@ -122,9 +122,9 @@
               </el-form-item>
               <el-form-item label="光标样式">
                 <el-radio-group v-model="settings.terminal.cursorStyle">
-                  <el-radio label="block">方块</el-radio>
-                  <el-radio label="underline">下划线</el-radio>
-                  <el-radio label="bar">竖线</el-radio>
+                  <el-radio value="block">方块</el-radio>
+                  <el-radio value="underline">下划线</el-radio>
+                  <el-radio value="bar">竖线</el-radio>
                 </el-radio-group>
               </el-form-item>
               <el-form-item label="光标闪烁">

@@ -159,6 +159,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     selectDirectory: () => ipcRenderer.invoke('backup:selectDirectory')
   },
 
+  // Log operations
+  log: {
+    getLogs: (filter?: any) => ipcRenderer.invoke('log:getLogs', filter),
+    enableSessionLogging: (sessionId: string) => ipcRenderer.invoke('log:enableSessionLogging', sessionId),
+    disableSessionLogging: (sessionId: string) => ipcRenderer.invoke('log:disableSessionLogging', sessionId)
+  },
+
   // App info
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion')
