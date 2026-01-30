@@ -444,6 +444,11 @@
           </div>
         </el-tab-pane>
 
+        <!-- AI 助手 -->
+        <el-tab-pane label="AI 助手" name="ai">
+          <AISettingsPanel />
+        </el-tab-pane>
+
         <!-- 关于 -->
         <el-tab-pane label="关于" name="about">          <div class="settings-section about-section">
             <div class="app-info">
@@ -619,6 +624,12 @@
             工作流 ({{ restoreBackupData.workflows?.length || 0 }} 个)
           </el-checkbox>
           <el-checkbox label="settings">应用设置</el-checkbox>
+          <el-checkbox label="aiConfig" :disabled="!restoreBackupData.aiConfig">
+            AI 配置 {{ restoreBackupData.aiConfig ? '✓' : '(无)' }}
+          </el-checkbox>
+          <el-checkbox label="aiChatHistory" :disabled="!restoreBackupData.aiChatHistory">
+            AI 聊天历史 ({{ restoreBackupData.aiChatHistory?.length || 0 }} 条)
+          </el-checkbox>
         </el-checkbox-group>
         <el-alert 
           type="info" 
@@ -703,6 +714,7 @@ import { Download, Upload, Refresh, Plus, Edit, Lock, Unlock } from '@element-pl
 import { themes } from '@/utils/terminal-themes'
 import { keyboardShortcutManager, type ShortcutConfig } from '@/utils/keyboard-shortcuts'
 import LanguageSwitcher from './LanguageSwitcher.vue'
+import AISettingsPanel from '../AI/AISettingsPanel.vue'
 import logoImg from '@/assets/logo.png'
 
 const activeTab = ref('general')
@@ -787,7 +799,7 @@ const backupPasswordConfirm = ref('')
 const restoreFilePath = ref('')
 const restorePassword = ref('')
 const restoreBackupData = ref<any>(null)
-const restoreOptions = ref<string[]>(['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings'])
+const restoreOptions = ref<string[]>(['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings', 'aiConfig', 'aiChatHistory'])
 const backupLoading = ref(false)
 
 const appVersion = ref('0.1.3')
@@ -866,10 +878,23 @@ const loadSettings = async () => {
   }
 }
 
+import { useAIStore } from '@/stores/ai'
+
+const aiStore = useAIStore()
+
 const saveSettings = async () => {
   try {
+    // 1. 保存常规设置
     // 使用toRaw获取原始对象，避免Vue响应式代理导致的序列化问题
     await window.electronAPI.settings.update(toRaw(settings.value))
+    
+    // 2. 保存 AI 设置
+    // 注意：AI 设置由 AIStore 独立管理，我们在这里触发它的保存逻辑
+    // 只有在 AI 配置已加载的情况下才保存，避免覆盖
+    if (aiStore.config) {
+      await aiStore.updateConfig({ ...aiStore.config })
+    }
+    
     ElMessage.success('设置已保存')
   } catch (error) {
     console.error('Save settings error:', error)
@@ -1048,7 +1073,9 @@ const applyRestore = async () => {
       restoreSessionTemplates: restoreOptions.value.includes('sessionTemplates'),
       restoreScheduledTasks: restoreOptions.value.includes('scheduledTasks'),
       restoreWorkflows: restoreOptions.value.includes('workflows'),
-      restoreSettings: restoreOptions.value.includes('settings')
+      restoreSettings: restoreOptions.value.includes('settings'),
+      restoreAIConfig: restoreOptions.value.includes('aiConfig'),
+      restoreAIChatHistory: restoreOptions.value.includes('aiChatHistory')
     }
 
     const result = await window.electronAPI.backup.apply(toRaw(restoreBackupData.value), options)
@@ -1112,7 +1139,7 @@ const cancelRestore = () => {
   restoreFilePath.value = ''
   restorePassword.value = ''
   restoreBackupData.value = null
-  restoreOptions.value = ['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings']
+  restoreOptions.value = ['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings', 'aiConfig', 'aiChatHistory']
 }
 
 // 格式化函数

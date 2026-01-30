@@ -32,6 +32,9 @@ export interface BackupData {
   scheduledTasks: any[]
   workflows: any[]
   settings: any
+  aiConfig?: any // AI 配置（可选，用于向后兼容）
+  aiChatHistory?: any[] // AI 聊天历史（可选）
+  aiTerminalChatHistory?: Record<string, any[]> // 终端 AI 聊天历史（可选） { filename: messages }
 }
 
 /**
@@ -205,7 +208,7 @@ export class BackupManager {
     try {
       // 收集所有数据
       const backupData: BackupData = {
-        version: '2.0.0', // 升级版本号以支持新的数据结构
+        version: '2.2.0', // 升级版本号以支持 AI 聊天历史
         timestamp: new Date().toISOString(),
         sessions: sessionManager.getAllSessions(),
         sessionGroups: sessionManager.getAllGroups(),
@@ -217,7 +220,10 @@ export class BackupManager {
         sessionTemplates: sessionTemplateManager.getAll(),
         scheduledTasks: taskSchedulerManager.getAll(),
         workflows: workflowManager.getAll(),
-        settings: await this.getAppSettings()
+        settings: await this.getAppSettings(),
+        aiConfig: await this.collectAIConfig(), // 收集 AI 配置
+        aiChatHistory: await this.collectAIChatHistory(), // 收集 AI 聊天历史
+        aiTerminalChatHistory: await this.collectAITerminalChatHistory() // 收集终端 AI 聊天历史
       }
 
       // 序列化数据
@@ -255,6 +261,84 @@ export class BackupManager {
   }
 
   /**
+   * 收集AI配置
+   */
+  private async collectAIConfig(): Promise<any | null> {
+    try {
+      const aiConfigPath = join(app.getPath('userData'), 'ai-config.json')
+      try {
+        const data = await fs.readFile(aiConfigPath, 'utf-8')
+        return JSON.parse(data)
+      } catch (error: any) {
+        if (error.code === 'ENOENT') {
+          // 配置文件不存在，返回 null
+          return null
+        }
+        throw error
+      }
+    } catch (error) {
+      logger.logError('system', 'Failed to collect AI config', error as Error)
+      return null
+    }
+  }
+
+  /**
+   * 收集AI聊天历史
+   */
+  private async collectAIChatHistory(): Promise<any[] | undefined> {
+    try {
+      const chatHistoryPath = join(app.getPath('userData'), 'ai-chat-history.json')
+      try {
+        const data = await fs.readFile(chatHistoryPath, 'utf-8')
+        return JSON.parse(data)
+      } catch (error: any) {
+        if (error.code === 'ENOENT') {
+          // 聊天历史文件不存在，返回 undefined
+          return undefined
+        }
+        throw error
+      }
+    } catch (error) {
+      logger.logError('system', 'Failed to collect AI chat history', error as Error)
+      logger.logError('system', 'Failed to collect AI chat history', error as Error)
+      return undefined
+    }
+  }
+
+  /**
+   * 收集终端AI聊天历史
+   */
+  private async collectAITerminalChatHistory(): Promise<Record<string, any[]> | undefined> {
+    try {
+      const historyDir = join(app.getPath('userData'), 'ai-terminal-history')
+      try {
+        const files = await fs.readdir(historyDir)
+        const history: Record<string, any[]> = {}
+
+        for (const file of files) {
+          if (!file.endsWith('.json')) continue
+
+          const content = await fs.readFile(join(historyDir, file), 'utf-8')
+          history[file] = JSON.parse(content)
+        }
+
+        // 如果为空，返回 undefined
+        if (Object.keys(history).length === 0) return undefined
+
+        return history
+      } catch (error: any) {
+        if (error.code === 'ENOENT') {
+          return undefined
+        }
+        throw error
+      }
+    } catch (error) {
+      logger.logError('system', 'Failed to collect AI terminal chat history', error as Error)
+      return undefined
+    }
+  }
+
+  /**
    * 收集SSH密钥（包含私钥内容）
    */
   private async collectSSHKeysWithPrivateKeys(): Promise<any[]> {
@@ -266,7 +350,7 @@ export class BackupManager {
         try {
           // 读取私钥文件内容
           const privateKeyContent = await fs.readFile(key.privateKeyPath, 'utf-8')
-          
+
           // 尝试读取公钥文件内容
           let publicKeyContent = key.publicKey
           const publicKeyPath = `${key.privateKeyPath}.pub`
@@ -362,6 +446,8 @@ export class BackupManager {
     restoreSessionTemplates?: boolean
     restoreScheduledTasks?: boolean
     restoreWorkflows?: boolean
+    restoreAIConfig?: boolean
+    restoreAIChatHistory?: boolean
   }): Promise<void> {
     try {
       // 恢复会话
@@ -444,7 +530,7 @@ export class BackupManager {
         for (const key of backupData.sshKeys) {
           try {
             const existing = sshKeyManager.getAllKeys().find(k => k.id === key.id || k.name === key.name)
-            
+
             // 如果备份中包含私钥内容，恢复完整的密钥
             if (key.privateKeyContent) {
               if (existing) {
@@ -453,7 +539,7 @@ export class BackupManager {
                 // 删除旧密钥
                 sshKeyManager.deleteKey(existing.id)
               }
-              
+
               // 使用 addKey 方法恢复密钥（会创建新的密钥文件）
               sshKeyManager.addKey({
                 name: key.name,
@@ -462,7 +548,7 @@ export class BackupManager {
                 passphrase: key.protected ? undefined : undefined, // 如果有密码保护，用户需要重新输入
                 comment: key.comment
               })
-              
+
               logger.logInfo('system', `SSH key "${key.name}" restored successfully with private key`)
             } else {
               // 如果没有私钥内容（旧版本备份），只恢复元数据
@@ -564,6 +650,34 @@ export class BackupManager {
         } catch (error) {
           logger.logError('system', 'Failed to restore settings', error as Error)
         }
+      }
+
+      // 恢复 AI 配置
+      if (options.restoreAIConfig && backupData.aiConfig) {
+        try {
+          const aiConfigPath = join(app.getPath('userData'), 'ai-config.json')
+          await fs.writeFile(aiConfigPath, JSON.stringify(backupData.aiConfig, null, 2), 'utf-8')
+          logger.logInfo('system', 'AI config restored successfully')
+        } catch (error) {
+          logger.logError('system', 'Failed to restore AI config', error as Error)
+        }
+      } else if (options.restoreAIConfig && !backupData.aiConfig) {
+        // 向后兼容：旧版本备份没有 aiConfig 字段
+        logger.logInfo('system', 'No AI config found in backup (old version backup)')
+      }
+
+      // 恢复 AI 聊天历史
+      if (options.restoreAIChatHistory && backupData.aiChatHistory) {
+        try {
+          const chatHistoryPath = join(app.getPath('userData'), 'ai-chat-history.json')
+          await fs.writeFile(chatHistoryPath, JSON.stringify(backupData.aiChatHistory, null, 2), 'utf-8')
+          logger.logInfo('system', 'AI chat history restored successfully')
+        } catch (error) {
+          logger.logError('system', 'Failed to restore AI chat history', error as Error)
+        }
+      } else if (options.restoreAIChatHistory && !backupData.aiChatHistory) {
+        // 向后兼容：旧版本备份没有 aiChatHistory 字段
+        logger.logInfo('system', 'No AI chat history found in backup (old version backup)')
       }
 
       try {

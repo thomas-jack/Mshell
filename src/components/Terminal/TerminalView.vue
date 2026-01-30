@@ -3,11 +3,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { getTheme } from '@/utils/terminal-themes'
 import { terminalManager } from '@/utils/terminal-manager'
+import { useAIStore } from '@/stores/ai'
+import { ElMessage } from 'element-plus'
 import 'xterm/css/xterm.css'
 
 interface TerminalOptions {
@@ -43,7 +45,13 @@ const emit = defineEmits<{
   resize: [cols: number, rows: number]
   input: [input: string]
   cursorPosition: [position: { x: number; y: number }]
+  'ai-request': [text: string]
 }>()
+
+const aiStore = useAIStore()
+
+// 计算属性：检查是否有默认模型
+const hasDefaultModel = computed(() => aiStore.hasDefaultModel)
 
 const terminalContainer = ref<HTMLElement>()
 let terminal: Terminal | null = null
@@ -56,6 +64,11 @@ let commandStartTime: number | null = null
 
 onMounted(() => {
   if (!terminalContainer.value) return
+
+  // 加载 AI 配置
+  aiStore.loadConfig().catch(err => {
+    console.error('Failed to load AI config:', err)
+  })
 
   const theme = typeof props.options.theme === 'string'
     ? getTheme(props.options.theme)
@@ -83,20 +96,6 @@ onMounted(() => {
 
     // Handle terminal input
     terminal.onData((data) => {
-      console.log(`[TerminalView] onData triggered for ${props.connectionId}, data:`, data)
-      
-      // 调试模式：记录按键数据（可选）
-      if (import.meta.env.DEV) {
-        // 在开发模式下，记录特殊按键的十六进制表示
-        const hasSpecialChars = /[\x00-\x1F\x7F-\xFF]/.test(data)
-        if (hasSpecialChars) {
-          const hex = Array.from(data)
-            .map(c => '0x' + c.charCodeAt(0).toString(16).padStart(2, '0'))
-            .join(' ')
-          console.debug('[Terminal Key]', { raw: data, hex, length: data.length })
-        }
-      }
-      
       // 更新当前行缓冲（用于自动补全）
       if (data === '\r' || data === '\n') {
         // 回车键 - 命令执行
@@ -136,9 +135,8 @@ onMounted(() => {
           const cursorY = terminal.buffer.active.cursorY
           const rect = terminalContainer.value.getBoundingClientRect()
           
-          // 计算光标的屏幕坐标（粗略估算）
-          const charWidth = 9 // 大约的字符宽度
-          const lineHeight = 20 // 大约的行高
+          const charWidth = 9 
+          const lineHeight = 20
           
           emit('cursorPosition', {
             x: rect.left + cursorX * charWidth,
@@ -148,10 +146,8 @@ onMounted(() => {
       }
       
       emit('data', data)
-      // Also send via IPC
       window.electronAPI.ssh.write(props.connectionId, data)
       
-      // 更新流量统计（发送）
       try {
         const bytesOut = new Blob([data]).size
         window.electronAPI.connectionStats?.updateTraffic?.(props.connectionId, 0, bytesOut)
@@ -163,15 +159,11 @@ onMounted(() => {
     // Handle terminal resize
     terminal.onResize(({ cols, rows }) => {
       emit('resize', cols, rows)
-      // Also send via IPC
       window.electronAPI.ssh.resize(props.connectionId, cols, rows)
     })
-
-    // SSH events are now managed by TerminalManager
-    // This ensures data flow persists even if this View component is destroyed/recreated (e.g. during split)
   }
 
-  // Right-click context menu for copy/paste (每次挂载都需要重新绑定到新容器)
+  // Right-click context menu for copy/paste and AI features
   if (terminalContainer.value) {
     terminalContainer.value.addEventListener('contextmenu', async (e) => {
       e.preventDefault()
@@ -180,6 +172,7 @@ onMounted(() => {
       // Show context menu via Electron
       const menuItems = []
       
+      // 基础操作
       if (selection) {
         menuItems.push({
           label: '复制',
@@ -208,24 +201,62 @@ onMounted(() => {
         action: 'clear'
       })
       
+      // AI 功能菜单
+      menuItems.push({ type: 'separator' })
+      
+      const aiEnabled = hasDefaultModel.value
+      const aiLabel = aiEnabled ? 'AI 助手' : 'AI 助手 (未配置)'
+      
+      menuItems.push({
+        label: aiLabel,
+        enabled: aiEnabled,
+        submenu: [
+          {
+            label: 'AI 撰写代码',
+            action: 'ai-write',
+            enabled: aiEnabled
+          },
+          {
+            label: selection ? 'AI 解释代码' : 'AI 解释代码 (需要选中代码)',
+            action: 'ai-explain',
+            enabled: aiEnabled && !!selection
+          },
+          {
+            label: selection ? 'AI 优化代码' : 'AI 优化代码 (需要选中代码)',
+            action: 'ai-optimize',
+            enabled: aiEnabled && !!selection
+          }
+        ]
+      })
+      
       // Request context menu from main process
       const result = await window.electronAPI.dialog.showContextMenu(menuItems)
       
+      // 处理基础操作
       if (result === 'copy' && selection) {
         await navigator.clipboard.writeText(selection)
       } else if (result === 'paste') {
         const text = await navigator.clipboard.readText()
         if (text) {
-          // Send directly via IPC instead of using terminal.paste()
           window.electronAPI.ssh.write(props.connectionId, text)
-          
-          // 记录粘贴的命令到历史
           recordPastedCommands(text)
         }
       } else if (result === 'selectAll') {
         terminal?.selectAll()
       } else if (result === 'clear') {
         terminal?.clear()
+      }
+      // 处理 AI 操作
+      else if (result === 'ai-write') {
+        await handleAIWrite(selection || '')
+      } else if (result === 'ai-explain') {
+        if (selection) {
+          await handleAIExplain(selection)
+        }
+      } else if (result === 'ai-optimize') {
+        if (selection) {
+          await handleAIOptimize(selection)
+        }
       }
     })
   }
@@ -234,14 +265,11 @@ onMounted(() => {
   resizeObserver = new ResizeObserver((entries) => {
     if (!fitAddon || !terminal || !terminalContainer.value) return
     
-    // 检查容器尺寸是否有效
     for (const entry of entries) {
         const { width, height } = entry.contentRect
         if (width <= 0 || height <= 0) return
     }
 
-    // 使用 requestAnimationFrame 避免 "ResizeObserver loop limit exceeded" 错误
-    // 并确保在下一帧布局稳定后执行 fit
     requestAnimationFrame(() => {
         try {
             fitAddon?.fit()
@@ -255,8 +283,6 @@ onMounted(() => {
     resizeObserver.observe(terminalContainer.value)
   }
 
-  // 强制延迟执行一次 fit，解决初始化时尺寸计算不准的问题
-  // 300ms 足够等待 Grid 布局动画完成
   setTimeout(() => {
     try {
         console.log(`[TerminalView] Delayed initial fit for ${props.connectionId}`)
@@ -271,14 +297,11 @@ onMounted(() => {
 onUnmounted(() => {
   console.log(`[TerminalView] Unmounting terminal view for ${props.connectionId}`)
   
-  // 只断开 ResizeObserver，不销毁终端实例
-  // 终端实例由 terminalManager 管理，在连接真正关闭时才销毁
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
   }
   
-  // 清空引用，但不销毁实例
   terminal = null
   fitAddon = null
   searchAddon = null
@@ -298,7 +321,6 @@ const recordCommand = async (command: string) => {
       duration
     })
     
-    // 增加命令计数统计
     try {
       await window.electronAPI.connectionStats?.incrementCommand?.(props.connectionId)
     } catch (error) {
@@ -324,13 +346,56 @@ const recordPastedCommands = async (text: string) => {
           command,
           sessionId: props.connectionId,
           sessionName: props.sessionName || 'Unknown Session',
-          duration: undefined // 粘贴的命令没有执行时长
+          duration: undefined 
         })
       }
     }
   } catch (error) {
     console.error('Failed to record pasted commands:', error)
   }
+}
+
+// AI 操作处理函数
+const handleAIWrite = async (description: string) => {
+  if (!hasDefaultModel.value) {
+    ElMessage.warning('请先在设置中配置 AI 默认模型')
+    return
+  }
+
+  if (!description) {
+    ElMessage.warning('请输入描述')
+    return
+  }
+
+  emit('ai-request', `请根据以下描述编写代码。代码应遵循最佳实践，包含必要的注释，并处理可能的异常情况：\n\n需求描述：${description}`)
+}
+
+const handleAIExplain = async (code: string) => {
+  if (!hasDefaultModel.value) {
+    ElMessage.warning('请先在设置中配置 AI 默认模型')
+    return
+  }
+
+  if (!code) {
+    ElMessage.warning('请先选中要解释的代码')
+    return
+  }
+
+  emit('ai-request', `请作为一名资深开发人员，详细分析并解释以下代码片段。请涵盖以下几点：\n1. 代码的主要功能和目的。\n2. 逐行或逐块解释关键逻辑。\n3. 指出可能存在的潜在错误、安全风险或边界情况。\n\n代码内容：\n${code}`)
+}
+
+const handleAIOptimize = async (code: string) => {
+  if (!hasDefaultModel.value) {
+    ElMessage.warning('请先在设置中配置 AI 默认模型')
+    return
+  }
+
+  if (!code) {
+    ElMessage.warning('请先选中要优化的代码')
+    return
+  }
+
+  emit('ai-request', `请作为一名资深开发人员，审查并优化以下代码片段。优化目标包括性能提升、可读性增强、安全性加固及遵循遵循最佳实践。请提供优化后的代码并说明改进点：\n\n原始代码：\n${code}`)
 }
 
 // Watch for option changes
@@ -381,6 +446,15 @@ defineExpose({
     if (terminal) {
       terminal.focus()
     }
+  },
+  // 更新当前命令缓冲（用于自动补全后同步状态）
+  updateCommandBuffer: (newCommand: string) => {
+    currentCommand = newCommand
+    currentLineBuffer = newCommand
+  },
+  // 获取当前命令
+  getCurrentCommand: () => {
+    return currentCommand
   },
   search: (term: string, options?: { caseSensitive?: boolean; regex?: boolean }) => {
     console.log(`[TerminalView] Searching for: "${term}"`, options)
@@ -445,7 +519,6 @@ defineExpose({
   overflow-y: auto;
 }
 
-/* 搜索高亮样式 */
 /* 搜索高亮样式 */
 .terminal-container :deep(.xterm-search-result) {
   background-color: rgba(255, 255, 0, 0.8) !important;

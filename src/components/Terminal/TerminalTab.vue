@@ -69,6 +69,16 @@
             :class="{ 'is-active': showMonitor }"
           />
         </el-tooltip>
+        <el-tooltip :content="showTerminalAI ? '关闭 AI 助手' : 'AI 助手'" placement="bottom">
+          <el-button
+            type="primary"
+            link
+            :icon="ChatDotRound"
+            @click="showTerminalAI = !showTerminalAI"
+            class="action-btn"
+            :class="{ 'is-active': showTerminalAI }"
+          />
+        </el-tooltip>
         <el-tooltip v-if="!hideCloseButton" content="Disconnect" placement="bottom">
           <el-button
             type="danger"
@@ -101,7 +111,7 @@
     </transition>
     
     <div class="terminal-body">
-      <div class="terminal-content" :class="{ 'with-monitor': showMonitor, 'with-history': showCommandHistory }">
+      <div class="terminal-content" :class="{ 'with-monitor': showMonitor, 'with-history': showCommandHistory, 'with-ai': showTerminalAI }">
         <TerminalView
           v-if="isConnected"
           :connection-id="connectionId"
@@ -110,6 +120,7 @@
           ref="terminalRef"
           @input="handleTerminalInput"
           @cursor-position="handleCursorPosition"
+          @ai-request="handleAIRequest"
         />
         <div v-else class="connecting-overlay">
           <div class="loader"></div>
@@ -144,6 +155,19 @@
       <transition name="slide-left">
         <div v-if="showMonitor" class="monitor-sidebar">
           <ServerMonitorPanel :session-id="connectionId" />
+        </div>
+      </transition>
+      
+      <!-- 终端 AI 助手面板 -->
+      <transition name="slide-left">
+        <div v-if="showTerminalAI" class="ai-sidebar">
+          <TerminalAIChatPanel 
+            ref="terminalAIRef"
+            :connection-id="connectionId" 
+            :session-name="session?.name"
+            :storage-id="aiStorageId"
+            @close="showTerminalAI = false"
+          />
         </div>
       </transition>
     </div>
@@ -264,14 +288,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Close, Loading, Search, Document, Brush, Monitor, Clock } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { Close, Loading, Search, Document, Brush, Monitor, Clock, ChatDotRound } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TerminalView from './TerminalView.vue'
 import TerminalSearch from './TerminalSearch.vue'
 import CommandAutocomplete from './CommandAutocomplete.vue'
 import CommandHistoryPanel from './CommandHistoryPanel.vue'
 import ServerMonitorPanel from '../Monitor/ServerMonitorPanel.vue'
+import TerminalAIChatPanel from '../AI/TerminalAIChatPanel.vue'
 import { themes } from '@/utils/terminal-themes'
 import { terminalManager } from '@/utils/terminal-manager'
 import type { SessionConfig as BaseSessionConfig } from '@/types/session'
@@ -311,7 +336,11 @@ const emit = defineEmits<{
   close: [connectionId: string]
 }>()
 
+// AI 历史记录存储 ID：优先使用 session ID（如果是保存的会话），否则使用连接 ID
+const aiStorageId = computed(() => props.session?.id || props.connectionId)
+
 const terminalRef = ref()
+const terminalAIRef = ref()
 const autocompleteRef = ref()
 const isConnected = ref(false)
 const connectionStatus = ref<'connecting' | 'connected' | 'disconnected' | 'error' | 'reconnecting'>('connecting')
@@ -323,6 +352,7 @@ const showSnippetDialog = ref(false)
 const showVariableDialog = ref(false)
 const showMonitor = ref(false)
 const showCommandHistory = ref(false)
+const showTerminalAI = ref(false)
 const snippetSearch = ref('')
 const filterCategory = ref('')
 const filterTags = ref<string[]>([])
@@ -503,14 +533,36 @@ onMounted(async () => {
     
     // 检查是否有建议
     const hasSuggestions = autocompleteRef.value?.hasSuggestions?.() || false
+    // 检查用户是否主动选择了建议（使用了上下键）
+    const hasActiveSelection = autocompleteRef.value?.hasActiveSelection?.() || false
     
-    // 对于 Enter 和 Tab 键，只有在有建议时才拦截
-    if ((e.key === 'Enter' || e.key === 'Tab') && !hasSuggestions) {
+    // Enter 键的处理逻辑：
+    // - 如果用户主动选择了建议（用上下键），则确认选择
+    // - 如果用户没有主动选择，则关闭弹窗并执行命令
+    if (e.key === 'Enter') {
+      if (hasActiveSelection && hasSuggestions) {
+        // 用户主动选择了，确认补全
+        e.preventDefault()
+        e.stopPropagation()
+        if (autocompleteRef.value) {
+          autocompleteRef.value.selectCurrent()
+        }
+      } else {
+        // 用户没有主动选择，关闭弹窗，让 Enter 正常执行命令
+        showAutocomplete.value = false
+        autocompleteInput.value = ''
+        // 不阻止事件，让终端正常处理
+      }
+      return
+    }
+    
+    // 对于 Tab 键，只有在有建议时才拦截
+    if (e.key === 'Tab' && !hasSuggestions) {
       return // 让按键正常传递到终端
     }
     
-    // 阻止终端捕获这些按键
-    if (['ArrowUp', 'ArrowDown', 'Tab', 'Enter', 'Escape'].includes(e.key)) {
+    // 阻止终端捕获这些按键（除了 Enter）
+    if (['ArrowUp', 'ArrowDown', 'Tab', 'Escape'].includes(e.key)) {
       e.preventDefault()
       e.stopPropagation()
       
@@ -529,8 +581,7 @@ onMounted(async () => {
           }
           break
         case 'Tab':
-        case 'Enter':
-          // 确认选择
+          // Tab 键确认补全
           if (autocompleteRef.value) {
             autocompleteRef.value.selectCurrent()
           }
@@ -694,6 +745,15 @@ onUnmounted(async () => {
   
   console.log(`[TerminalTab] Cleanup completed for ${props.connectionId}`)
 })
+
+// 处理来自终端的 AI 请求
+const handleAIRequest = async (text: string) => {
+  showTerminalAI.value = true
+  await nextTick()
+  if (terminalAIRef.value) {
+    terminalAIRef.value.performAction(text)
+  }
+}
 
 const handleClose = () => {
   emit('close', props.connectionId)
@@ -859,7 +919,7 @@ const handleTerminalInput = (input: string) => {
                      !input.endsWith('\r') &&
                      (input.startsWith('/') || input.length >= 2)
   
-  showAutocomplete.value = shouldShow
+  showAutocomplete.value = Boolean(shouldShow)
 }
 
 // 处理光标位置（用于定位补全弹窗）
@@ -885,10 +945,14 @@ const handleAutocompleteSelect = (text: string) => {
       const lastWord = words[words.length - 1]
       deleteCount = lastWord.length
     }
-    
-    // 发送退格和新文本
-    const backspaces = '\b \b'.repeat(deleteCount) // 退格、空格、退格（完全清除字符）
+    // 发送退格删除当前单词，然后发送新文本
+    // 使用 \x7f (DEL) 或 \b 来删除字符
+    const backspaces = '\x7f'.repeat(deleteCount)
     window.electronAPI.ssh.write(props.connectionId, backspaces + text)
+    
+    // 计算补全后的完整命令并更新终端的命令缓冲
+    const newCommand = currentInput.slice(0, currentInput.length - deleteCount) + text
+    terminalRef.value.updateCommandBuffer?.(newCommand.trim())
     
     // 如果是快捷命令，增加使用次数
     if (currentInput.startsWith('/')) {
@@ -900,13 +964,25 @@ const handleAutocompleteSelect = (text: string) => {
       })
     }
     
-    // 自动聚焦终端，确保用户可以继续输入
+    // 自动聚焦终端
     setTimeout(() => {
       if (terminalRef.value) {
         terminalRef.value.focus()
       }
     }, 50)
+
+    // --- 连续补全逻辑 (Continuous Completion) ---
+    // 如果补全文本自带空格 (如 "restart ")，说明用户可能需要立即补全下一个参数
+    // 我们手动更新 input 状态，并保持弹窗打开
+    if (text.endsWith(' ')) {
+        autocompleteInput.value = newCommand
+        // 确保符合显示条件 (非空等)，通常来说加上命令后肯定符合
+        showAutocomplete.value = true
+        return // 早期返回，跳过下面的关闭逻辑
+    }
   }
+  
+  // 默认：补全结束，关闭弹窗
   showAutocomplete.value = false
   autocompleteInput.value = ''
 }
@@ -1035,6 +1111,11 @@ defineExpose({
   display: inline-flex;
 }
 
+/* 移除按钮之间的默认 margin，通过 gap 统一控制 */
+.header-actions :deep(.el-button + .el-button) {
+  margin-left: 0 !important;
+}
+
 .header-actions :deep(.el-dropdown .el-button) {
   padding: 2px !important;
   height: 20px !important;
@@ -1083,6 +1164,10 @@ defineExpose({
   flex: 1;
 }
 
+.terminal-content.with-ai {
+  flex: 1;
+}
+
 .history-sidebar {
   width: 480px;
   background: var(--bg-main);
@@ -1099,6 +1184,15 @@ defineExpose({
   border-left: 1px solid var(--border-color);
   overflow-y: auto;
   flex-shrink: 0;
+}
+
+.ai-sidebar {
+  width: 380px;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 滑动动画 */

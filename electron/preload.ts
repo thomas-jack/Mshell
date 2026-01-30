@@ -442,6 +442,56 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onFailed: (callback: (data: any) => void) => {
       ipcRenderer.on('workflow:failed', (_event, data) => callback(data))
     }
+  },
+
+  // AI operations
+  ai: {
+    // 渠道管理
+    addChannel: (data: any) => ipcRenderer.invoke('ai:addChannel', data),
+    updateChannel: (id: string, updates: any) => ipcRenderer.invoke('ai:updateChannel', id, updates),
+    deleteChannel: (id: string) => ipcRenderer.invoke('ai:deleteChannel', id),
+    verifyChannel: (id: string) => ipcRenderer.invoke('ai:verifyChannel', id),
+    getAllChannels: () => ipcRenderer.invoke('ai:getAllChannels'),
+
+    // 模型管理
+    fetchModels: (channelId: string) => ipcRenderer.invoke('ai:fetchModels', channelId),
+    addModel: (data: any) => ipcRenderer.invoke('ai:addModel', data),
+    deleteModel: (id: string) => ipcRenderer.invoke('ai:deleteModel', id),
+    getAllModels: () => ipcRenderer.invoke('ai:getAllModels'),
+    setDefaultModel: (modelId: string) => ipcRenderer.invoke('ai:setDefaultModel', modelId),
+
+    // AI 请求
+    request: (action: string, content: string, language?: string) =>
+      ipcRenderer.invoke('ai:request', action, content, language),
+    cancelRequest: (requestId: string) => ipcRenderer.invoke('ai:cancelRequest', requestId),
+
+    // 配置管理
+    updateConfig: (updates: any) => ipcRenderer.invoke('ai:updateConfig', updates),
+    getConfig: () => ipcRenderer.invoke('ai:getConfig'),
+
+    // 事件监听
+    onProgress: (callback: (requestId: string, progress: number) => void) => {
+      ipcRenderer.on('ai:progress', (_event, requestId, progress) => callback(requestId, progress))
+    },
+    onComplete: (callback: (requestId: string, response: string) => void) => {
+      ipcRenderer.on('ai:complete', (_event, requestId, response) => callback(requestId, response))
+    },
+    onError: (callback: (requestId: string, error: string) => void) => {
+      ipcRenderer.on('ai:error', (_event, requestId, error) => callback(requestId, error))
+    },
+    onCancelled: (callback: (requestId: string) => void) => {
+      ipcRenderer.on('ai:cancelled', (_event, requestId) => callback(requestId))
+    },
+
+    // 聊天历史管理（全局）
+    getChatHistory: () => ipcRenderer.invoke('ai:getChatHistory'),
+    saveChatHistory: (messages: any[]) => ipcRenderer.invoke('ai:saveChatHistory', messages),
+    clearChatHistory: () => ipcRenderer.invoke('ai:clearChatHistory'),
+
+    // 聊天历史管理（终端）
+    getTerminalChatHistory: (connectionId: string) => ipcRenderer.invoke('ai:getTerminalChatHistory', connectionId),
+    saveTerminalChatHistory: (connectionId: string, messages: any[]) => ipcRenderer.invoke('ai:saveTerminalChatHistory', connectionId, messages),
+    clearTerminalChatHistory: (connectionId: string) => ipcRenderer.invoke('ai:clearTerminalChatHistory', connectionId)
   }
 })
 

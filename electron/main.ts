@@ -19,11 +19,13 @@ import { registerAuditLogHandlers } from './ipc/audit-log-handlers'
 import { registerSessionLockHandlers } from './ipc/session-lock-handlers'
 import { registerTaskSchedulerHandlers } from './ipc/task-scheduler-handlers'
 import { registerWorkflowHandlers } from './ipc/workflow-handlers'
+import { registerAIHandlers } from './ipc/ai-handlers'
 import { crashRecoveryManager } from './utils/crash-recovery'
 import { logger } from './utils/logger'
 import { backupManager } from './managers/BackupManager'
 import { appSettingsManager } from './utils/app-settings'
 import { sessionLockManager } from './managers/SessionLockManager'
+import { aiManager } from './managers/AIManager'
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -51,6 +53,7 @@ registerAuditLogHandlers()
 registerSessionLockHandlers()
 registerTaskSchedulerHandlers()
 registerWorkflowHandlers()
+registerAIHandlers(ipcMain, aiManager)
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -230,6 +233,9 @@ app.whenReady().then(async () => {
   // 初始化备份管理器
   await backupManager.initialize()
 
+  // 初始化 AI 管理器
+  await aiManager.initialize()
+
   // 应用启动时打开设置
   const settings = appSettingsManager.getSettings()
   app.setLoginItemSettings({
@@ -237,6 +243,11 @@ app.whenReady().then(async () => {
   })
 
   createWindow()
+
+  // 设置 AI Manager 的主窗口引用
+  if (mainWindow) {
+    aiManager.setMainWindow(mainWindow)
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -255,6 +266,7 @@ app.on('before-quit', () => {
   isQuitting = true
   crashRecoveryManager.stop()
   backupManager.cleanup()
+  aiManager.cleanup()
 })
 
 // 创建托盘图标

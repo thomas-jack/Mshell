@@ -20,11 +20,25 @@
                   circle 
                 />
               </el-tooltip>
+              <el-tooltip content="AI 助手" placement="bottom">
+                <el-button 
+                  size="small" 
+                  :icon="ChatDotRound" 
+                  @click="appStore.showAIChat = !appStore.showAIChat" 
+                  :type="appStore.showAIChat ? 'primary' : ''"
+                  circle 
+                />
+              </el-tooltip>
               <el-button type="primary" size="small" :icon="Plus" @click="appStore.showSessionForm = true" circle />
               <el-button size="small" :icon="Lightning" @click="appStore.showQuickConnect = true" circle />
            </div>
         </div>
         
+        <!-- AI 聊天面板 -->
+        <transition name="slide-right">
+          <AIChatPanel v-if="appStore.showAIChat" />
+        </transition>
+
         <div class="app-content">
           <div v-show="appStore.activeView === 'sessions'" class="content-panel">
             <div class="sessions-panel glass-panel">
@@ -255,8 +269,9 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Plus, Lightning, Grid } from '@element-plus/icons-vue'
+import { Connection, Plus, Lightning, Grid, ChatDotRound } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
+import { useAIStore } from '@/stores/ai'
 import { v4 as uuidv4 } from 'uuid'
 import { keyboardShortcutManager } from '@/utils/keyboard-shortcuts'
 import { useLocale } from '@/composables/useLocale'
@@ -282,6 +297,7 @@ import TaskSchedulerPanel from './components/Tasks/TaskSchedulerPanel.vue'
 import WorkflowPanel from './components/Workflows/WorkflowPanel.vue'
 import SessionTemplatePanel from './components/Session/SessionTemplatePanel.vue'
 import LockScreen from './components/Security/LockScreen.vue'
+import AIChatPanel from './components/AI/AIChatPanel.vue'
 
 import type { SessionConfig } from './types/session'
 
@@ -290,6 +306,7 @@ const { t } = useLocale()
 
 // 使用 store - 集中管理所有状态
 const appStore = useAppStore()
+const aiStore = useAIStore()
 
 // 锁定状态
 const isLocked = ref(false)
@@ -375,6 +392,9 @@ const handleTabReorder = (fromIndex: number, toIndex: number) => {
 onMounted(async () => {
   // 初始化应用状态
   await appStore.initialize()
+  
+  // 加载 AI 聊天记录
+  aiStore.loadChatHistory()
   
   // 监听设置变化
   window.electronAPI.settings.onChange((newSettings) => {
@@ -645,6 +665,17 @@ body,
   overflow: hidden;
   background-color: var(--bg-main);
   color: var(--text-primary);
+}
+
+/* Slide Right Transition */
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: transform 0.3s ease;
+}
+
+.slide-right-enter-from,
+.slide-right-leave-to {
+  transform: translateX(100%);
 }
 </style>
 

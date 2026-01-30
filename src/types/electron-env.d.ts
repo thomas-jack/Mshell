@@ -11,7 +11,24 @@ export interface ElectronAPI {
         renameGroup: (id: string, name: string) => Promise<void>
         deleteGroup: (id: string) => Promise<void>
     }
+    connectionStats?: {
+        updateTraffic: (connectionId: string, bytesIn: number, bytesOut: number) => Promise<void>
+        incrementCommand: (connectionId: string) => Promise<void>
+        start: (connectionId: string, sessionName?: string) => Promise<void>
+        stop: (connectionId: string) => Promise<void>
+        end: (connectionId: string) => Promise<void>
+        getStats: (connectionId: string) => Promise<any>
+    }
+    commandHistory?: {
+        add: (entry: any) => Promise<void>
+        getAll: (filter?: any) => Promise<any[]>
+        clear: () => Promise<void>
+        search: (query: string) => Promise<any[]>
+        getRecentUnique: (limit: number) => Promise<{ success: boolean; data?: string[]; error?: string }>
+    }
     ssh: {
+        executeCommand: (sessionId: string, command: string, timeout?: number) => Promise<{ success: boolean; data?: string; error?: string }>
+        cancelReconnect: (sessionId: string) => Promise<void>
         connect: (id: string, config: any) => Promise<{ success: boolean; error?: string }>
         disconnect: (id: string) => Promise<void>
         write: (id: string, data: string) => Promise<void>
@@ -187,6 +204,46 @@ export interface ElectronAPI {
         onTaskCompleted: (callback: (data: any) => void) => void
         onTaskFailed: (callback: (data: any) => void) => void
         onTaskNotify: (callback: (data: any) => void) => void
+    }
+    ai?: {
+        // 渠道管理
+        addChannel: (data: any) => Promise<{ success: boolean; data?: any; error?: string }>
+        updateChannel: (id: string, updates: any) => Promise<{ success: boolean; error?: string }>
+        deleteChannel: (id: string) => Promise<{ success: boolean; error?: string }>
+        verifyChannel: (id: string) => Promise<{ success: boolean; data?: boolean; error?: string }>
+        getAllChannels: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+
+        // 模型管理
+        fetchModels: (channelId: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        addModel: (data: any) => Promise<{ success: boolean; data?: any; error?: string }>
+        deleteModel: (id: string) => Promise<{ success: boolean; error?: string }>
+        getAllModels: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        setDefaultModel: (modelId: string) => Promise<{ success: boolean; error?: string }>
+
+        // AI 请求
+        request: (action: string, content: string, language?: string) => Promise<{ success: boolean; data?: string; error?: string }>
+        cancelRequest: (requestId: string) => Promise<{ success: boolean; error?: string }>
+
+        // 配置管理
+        updateConfig: (updates: any) => Promise<{ success: boolean; error?: string }>
+        getConfig: () => Promise<{ success: boolean; data?: any; error?: string }>
+
+        // 事件监听
+        onProgress: (callback: (requestId: string, progress: number) => void) => void
+        onComplete: (callback: (requestId: string, response: string) => void) => void
+        onError: (callback: (requestId: string, error: string) => void) => void
+        onCancelled: (callback: (requestId: string) => void) => void
+
+        // 聊天历史管理
+        // 聊天历史管理
+        getChatHistory: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        saveChatHistory: (messages: any[]) => Promise<{ success: boolean; error?: string }>
+        clearChatHistory: () => Promise<{ success: boolean; error?: string }>
+
+        // 终端聊天历史管理
+        getTerminalChatHistory: (connectionId: string) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        saveTerminalChatHistory: (connectionId: string, messages: any[]) => Promise<{ success: boolean; error?: string }>
+        clearTerminalChatHistory: (connectionId: string) => Promise<{ success: boolean; error?: string }>
     }
 }
 

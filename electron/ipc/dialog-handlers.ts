@@ -8,11 +8,11 @@ export function registerDialogHandlers() {
       filters: options?.filters || [],
       ...options
     })
-    
+
     if (result.canceled) {
       return null
     }
-    
+
     return result.filePaths[0]
   })
 
@@ -22,11 +22,11 @@ export function registerDialogHandlers() {
       filters: options?.filters || [],
       ...options
     })
-    
+
     if (result.canceled) {
       return null
     }
-    
+
     return result.filePath
   })
 
@@ -36,32 +36,57 @@ export function registerDialogHandlers() {
       properties: ['openDirectory'],
       ...options
     })
-    
+
     if (result.canceled) {
       return null
     }
-    
+
     return result.filePaths[0]
   })
 
   // Show context menu
   ipcMain.handle('dialog:showContextMenu', async (_event, menuItems) => {
     return new Promise((resolve) => {
-      const template = menuItems.map((item: any) => {
-        if (item.type === 'separator') {
-          return { type: 'separator' }
+      let isResolved = false
+      const safeResolve = (value: any) => {
+        if (!isResolved) {
+          isResolved = true
+          resolve(value)
         }
-        
-        return {
-          label: item.label,
-          accelerator: item.accelerator,
-          click: () => resolve(item.action)
-        }
-      })
-      
+      }
+
+      const buildTemplate = (items: any[]): Electron.MenuItemConstructorOptions[] => {
+        return items.map((item: any) => {
+          if (item.type === 'separator') {
+            return { type: 'separator' }
+          }
+
+          const menuItem: Electron.MenuItemConstructorOptions = {
+            label: item.label,
+            enabled: item.enabled !== false,
+            accelerator: item.accelerator
+          }
+
+          if (item.submenu && Array.isArray(item.submenu)) {
+            menuItem.submenu = buildTemplate(item.submenu)
+          } else {
+            menuItem.click = () => safeResolve(item.action)
+          }
+
+          return menuItem
+        })
+      }
+
+      const template = buildTemplate(menuItems)
+
       const menu = Menu.buildFromTemplate(template as any)
       menu.popup({
-        callback: () => resolve(null)
+        callback: () => {
+          // 延迟 resolve null，确保 click 事件优先触发
+          setTimeout(() => {
+            safeResolve(null)
+          }, 100)
+        }
       })
     })
   })
