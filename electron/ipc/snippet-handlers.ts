@@ -214,4 +214,59 @@ export function registerSnippetHandlers() {
       return { success: false, error: error.message }
     }
   })
+
+  // 导出片段到文件
+  ipcMain.handle('snippet:export', async (_event, filePath: string) => {
+    try {
+      const snippets = snippetManager.getAll()
+      const exportData = {
+        version: '1.0.0',
+        timestamp: new Date().toISOString(),
+        snippets: snippets
+      }
+      const { promises: fs } = await import('fs')
+      await fs.writeFile(filePath, JSON.stringify(exportData, null, 2), 'utf-8')
+      return { success: true, data: { count: snippets.length, path: filePath } }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 从文件导入片段
+  ipcMain.handle('snippet:import', async (_event, filePath: string) => {
+    try {
+      const { promises: fs } = await import('fs')
+      const content = await fs.readFile(filePath, 'utf-8')
+      const importData = JSON.parse(content)
+      
+      // 验证数据格式
+      if (!importData.snippets || !Array.isArray(importData.snippets)) {
+        throw new Error('无效的片段文件格式')
+      }
+      
+      const currentSnippets = snippetManager.getAll()
+      let imported = 0
+      let updated = 0
+      
+      for (const snippet of importData.snippets) {
+        // 检查是否存在相同片段（通过 ID 或 名称 判断）
+        const existing = currentSnippets.find(s =>
+          s.id === snippet.id || s.name === snippet.name
+        )
+        
+        if (existing) {
+          const { id, ...updates } = snippet
+          await snippetManager.update(existing.id, updates)
+          updated++
+        } else {
+          await snippetManager.create(snippet)
+          imported++
+        }
+      }
+      
+      return { success: true, data: { imported, updated, total: importData.snippets.length } }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
 }

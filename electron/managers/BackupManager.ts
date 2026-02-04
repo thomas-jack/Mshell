@@ -11,6 +11,10 @@ import { portForwardManager } from './PortForwardManager'
 import { sessionTemplateManager } from './SessionTemplateManager'
 import { taskSchedulerManager } from './TaskSchedulerManager'
 import { workflowManager } from './WorkflowManager'
+import { connectionStatsManager } from './ConnectionStatsManager'
+import { auditLogManager } from './AuditLogManager'
+import { transferRecordManager } from './TransferRecordManager'
+import { sessionLockManager } from './SessionLockManager'
 import { logger } from '../utils/logger'
 
 const scryptAsync = promisify(scrypt)
@@ -35,6 +39,11 @@ export interface BackupData {
   aiConfig?: any // AI 配置（可选，用于向后兼容）
   aiChatHistory?: any[] // AI 聊天历史（可选）
   aiTerminalChatHistory?: Record<string, any[]> // 终端 AI 聊天历史（可选） { filename: messages }
+  // 新增数据类型
+  connectionStats?: any[] // 连接统计
+  auditLogs?: any[] // 审计日志
+  transferRecords?: any[] // 传输记录
+  lockConfig?: any // 锁定配置（不包含密码）
 }
 
 /**
@@ -208,7 +217,7 @@ export class BackupManager {
     try {
       // 收集所有数据
       const backupData: BackupData = {
-        version: '2.2.0', // 升级版本号以支持 AI 聊天历史
+        version: '2.3.0', // 升级版本号以支持更多数据类型
         timestamp: new Date().toISOString(),
         sessions: sessionManager.getAllSessions(),
         sessionGroups: sessionManager.getAllGroups(),
@@ -223,7 +232,12 @@ export class BackupManager {
         settings: await this.getAppSettings(),
         aiConfig: await this.collectAIConfig(), // 收集 AI 配置
         aiChatHistory: await this.collectAIChatHistory(), // 收集 AI 聊天历史
-        aiTerminalChatHistory: await this.collectAITerminalChatHistory() // 收集终端 AI 聊天历史
+        aiTerminalChatHistory: await this.collectAITerminalChatHistory(), // 收集终端 AI 聊天历史
+        // 新增数据
+        connectionStats: connectionStatsManager.getAll(), // 连接统计
+        auditLogs: auditLogManager.getAll(), // 审计日志
+        transferRecords: transferRecordManager.getAllRecords(), // 传输记录
+        lockConfig: sessionLockManager.getConfig() // 锁定配置（不包含密码）
       }
 
       // 序列化数据
@@ -448,6 +462,11 @@ export class BackupManager {
     restoreWorkflows?: boolean
     restoreAIConfig?: boolean
     restoreAIChatHistory?: boolean
+    // 新增选项
+    restoreConnectionStats?: boolean
+    restoreAuditLogs?: boolean
+    restoreTransferRecords?: boolean
+    restoreLockConfig?: boolean
   }): Promise<void> {
     try {
       // 恢复会话
@@ -697,6 +716,71 @@ export class BackupManager {
           logger.logInfo('system', `AI terminal chat history restored successfully (${fileCount} files)`)
         } catch (error) {
           logger.logError('system', 'Failed to restore AI terminal chat history', error as Error)
+        }
+      }
+
+      // 恢复连接统计
+      if (options.restoreConnectionStats && backupData.connectionStats) {
+        try {
+          for (const stat of backupData.connectionStats) {
+            // ConnectionStatsManager 使用 BaseManager，直接添加记录
+            const existing = connectionStatsManager.getAll().find(s => s.id === stat.id)
+            if (!existing) {
+              // 使用内部方法添加记录
+              connectionStatsManager.create(stat)
+            }
+          }
+          logger.logInfo('system', `Connection stats restored: ${backupData.connectionStats.length} records`)
+        } catch (error) {
+          logger.logError('system', 'Failed to restore connection stats', error as Error)
+        }
+      }
+
+      // 恢复审计日志
+      if (options.restoreAuditLogs && backupData.auditLogs) {
+        try {
+          for (const log of backupData.auditLogs) {
+            const existing = auditLogManager.getAll().find(l => l.id === log.id)
+            if (!existing) {
+              auditLogManager.create(log)
+            }
+          }
+          logger.logInfo('system', `Audit logs restored: ${backupData.auditLogs.length} records`)
+        } catch (error) {
+          logger.logError('system', 'Failed to restore audit logs', error as Error)
+        }
+      }
+
+      // 恢复传输记录
+      if (options.restoreTransferRecords && backupData.transferRecords) {
+        try {
+          for (const record of backupData.transferRecords) {
+            const existing = transferRecordManager.getAllRecords().find((r: any) => r.id === record.id)
+            if (!existing) {
+              // 移除时间戳字段，让 createRecord 自动生成新的时间戳
+              const { createdAt, updatedAt, ...recordWithoutTimestamps } = record
+              await transferRecordManager.createRecord(recordWithoutTimestamps)
+            }
+          }
+          logger.logInfo('system', `Transfer records restored: ${backupData.transferRecords.length} records`)
+        } catch (error) {
+          logger.logError('system', 'Failed to restore transfer records', error as Error)
+        }
+      }
+
+      // 恢复锁定配置（不恢复密码，用户需要重新设置）
+      if (options.restoreLockConfig && backupData.lockConfig) {
+        try {
+          // 只恢复配置，不恢复密码
+          const { enabled, autoLockTimeout, lockOnMinimize } = backupData.lockConfig
+          sessionLockManager.updateConfig({
+            enabled: enabled || false,
+            autoLockTimeout: autoLockTimeout || 0,
+            lockOnMinimize: lockOnMinimize || false
+          })
+          logger.logInfo('system', 'Lock config restored (password not restored for security)')
+        } catch (error) {
+          logger.logError('system', 'Failed to restore lock config', error as Error)
         }
       }
 

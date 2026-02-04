@@ -761,6 +761,18 @@
           <el-checkbox label="aiChatHistory" :disabled="!restoreBackupData.aiChatHistory && !restoreBackupData.aiTerminalChatHistory">
             AI 聊天历史 ({{ restoreBackupData.aiChatHistory?.length || 0 }} 条{{ restoreBackupData.aiTerminalChatHistory ? `, ${Object.keys(restoreBackupData.aiTerminalChatHistory).length} 个终端` : '' }})
           </el-checkbox>
+          <el-checkbox label="connectionStats" :disabled="!restoreBackupData.connectionStats">
+            连接统计 ({{ restoreBackupData.connectionStats?.length || 0 }} 条)
+          </el-checkbox>
+          <el-checkbox label="auditLogs" :disabled="!restoreBackupData.auditLogs">
+            审计日志 ({{ restoreBackupData.auditLogs?.length || 0 }} 条)
+          </el-checkbox>
+          <el-checkbox label="transferRecords" :disabled="!restoreBackupData.transferRecords">
+            传输记录 ({{ restoreBackupData.transferRecords?.length || 0 }} 条)
+          </el-checkbox>
+          <el-checkbox label="lockConfig" :disabled="!restoreBackupData.lockConfig">
+            锁定配置 {{ restoreBackupData.lockConfig ? '✓' : '(无)' }}
+          </el-checkbox>
         </el-checkbox-group>
         <el-alert 
           type="info" 
@@ -941,7 +953,7 @@ const backupPasswordConfirm = ref('')
 const restoreFilePath = ref('')
 const restorePassword = ref('')
 const restoreBackupData = ref<any>(null)
-const restoreOptions = ref<string[]>(['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings', 'aiConfig', 'aiChatHistory'])
+const restoreOptions = ref<string[]>(['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings', 'aiConfig', 'aiChatHistory', 'connectionStats', 'auditLogs', 'transferRecords', 'lockConfig'])
 const backupLoading = ref(false)
 
 const appVersion = ref('0.1.3')
@@ -1233,7 +1245,11 @@ const applyRestore = async () => {
       restoreWorkflows: restoreOptions.value.includes('workflows'),
       restoreSettings: restoreOptions.value.includes('settings'),
       restoreAIConfig: restoreOptions.value.includes('aiConfig'),
-      restoreAIChatHistory: restoreOptions.value.includes('aiChatHistory')
+      restoreAIChatHistory: restoreOptions.value.includes('aiChatHistory'),
+      restoreConnectionStats: restoreOptions.value.includes('connectionStats'),
+      restoreAuditLogs: restoreOptions.value.includes('auditLogs'),
+      restoreTransferRecords: restoreOptions.value.includes('transferRecords'),
+      restoreLockConfig: restoreOptions.value.includes('lockConfig')
     }
 
     const result = await window.electronAPI.backup.apply(toRaw(restoreBackupData.value), options)
@@ -1297,7 +1313,7 @@ const cancelRestore = () => {
   restoreFilePath.value = ''
   restorePassword.value = ''
   restoreBackupData.value = null
-  restoreOptions.value = ['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings', 'aiConfig', 'aiChatHistory']
+  restoreOptions.value = ['sessions', 'snippets', 'commandHistory', 'sshKeys', 'portForwards', 'sessionTemplates', 'scheduledTasks', 'workflows', 'settings', 'aiConfig', 'aiChatHistory', 'connectionStats', 'auditLogs', 'transferRecords', 'lockConfig']
 }
 
 // 格式化函数
