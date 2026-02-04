@@ -16,6 +16,7 @@ export interface TerminalOptions {
   cursorBlink: boolean
   scrollback: number
   rendererType: 'dom' | 'canvas' | 'webgl'
+  copyOnSelect: boolean
 }
 
 /**
@@ -195,11 +196,12 @@ export const useAppStore = defineStore('app', () => {
   const terminalOptions = ref<TerminalOptions>({
     theme: 'dark',
     fontSize: 14,
-    fontFamily: 'JetBrains Mono, "Fira Code", Consolas, monospace',
+    fontFamily: "'JetBrains Mono', monospace",
     cursorStyle: 'block',
     cursorBlink: true,
     scrollback: 10000,
-    rendererType: 'webgl'
+    rendererType: 'webgl',
+    copyOnSelect: false
   })
 
   // 更新终端配置
@@ -234,7 +236,8 @@ export const useAppStore = defineStore('app', () => {
         cursorStyle: settings.terminal.cursorStyle,
         cursorBlink: settings.terminal.cursorBlink,
         scrollback: settings.terminal.scrollback,
-        rendererType: settings.terminal.rendererType || 'webgl'
+        rendererType: settings.terminal.rendererType || 'webgl',
+        copyOnSelect: settings.terminal.copyOnSelect || false
       })
     }
   }

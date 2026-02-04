@@ -2,17 +2,20 @@
   <div class="toolbar">
     <div class="toolbar-left">
       <el-button type="primary" :icon="Plus" @click="handleNewConnection">
-        New Connection
+        新建会话
+      </el-button>
+      <el-button :icon="Upload" @click="handleBatchImport">
+        批量导入
       </el-button>
       <el-button :icon="Lightning" @click="handleQuickConnect">
-        Quick Connect
+        快速连接
       </el-button>
     </div>
     
     <div class="toolbar-right">
       <el-input
         v-model="searchQuery"
-        placeholder="Search sessions..."
+        placeholder="搜索会话..."
         :prefix-icon="Search"
         clearable
         style="width: 250px"
@@ -24,13 +27,14 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Plus, Lightning, Search } from '@element-plus/icons-vue'
+import { Plus, Lightning, Search, Upload } from '@element-plus/icons-vue'
 
 const searchQuery = ref('')
 
 const emit = defineEmits<{
   newConnection: []
   quickConnect: []
+  batchImport: []
   search: [query: string]
 }>()
 
@@ -40,6 +44,10 @@ const handleNewConnection = () => {
 
 const handleQuickConnect = () => {
   emit('quickConnect')
+}
+
+const handleBatchImport = () => {
+  emit('batchImport')
 }
 
 const handleSearch = (query: string) => {

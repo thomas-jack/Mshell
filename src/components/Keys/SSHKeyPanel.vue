@@ -9,9 +9,17 @@
         <el-button type="primary" :icon="Plus" @click="showGenerateDialog = true">
           生成密钥
         </el-button>
-        <el-button :icon="Upload" @click="handleImport">
-          导入密钥
-        </el-button>
+        <el-dropdown @command="handleImportCommand">
+          <el-button :icon="Upload">
+            导入密钥 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="single">导入单个密钥</el-dropdown-item>
+              <el-dropdown-item command="batch">批量导入密钥</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
 
@@ -37,11 +45,22 @@
             {{ formatDate(row.createdAt) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" min-width="200">
           <template #default="{ row }">
-            <el-button size="small" :icon="Edit" @click="handleEdit(row)">编辑</el-button>
-            <el-button size="small" :icon="Download" @click="handleExport(row)">导出</el-button>
-            <el-button size="small" type="danger" :icon="Delete" @click="handleDelete(row)">删除</el-button>
+            <div class="action-buttons">
+              <el-tooltip content="复制公钥" placement="top">
+                <el-button size="small" :icon="CopyDocument" @click="handleCopyPublicKey(row)" />
+              </el-tooltip>
+              <el-tooltip content="编辑" placement="top">
+                <el-button size="small" :icon="Edit" @click="handleEdit(row)" />
+              </el-tooltip>
+              <el-tooltip content="导出" placement="top">
+                <el-button size="small" :icon="Download" @click="handleExport(row)" />
+              </el-tooltip>
+              <el-tooltip content="删除" placement="top">
+                <el-button size="small" type="danger" :icon="Delete" @click="handleDelete(row)" />
+              </el-tooltip>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -160,7 +179,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload, Download, Delete, Lock, Unlock, Edit } from '@element-plus/icons-vue'
+import { Plus, Upload, Download, Delete, Lock, Unlock, Edit, CopyDocument, ArrowDown } from '@element-plus/icons-vue'
 
 const keys = ref<any[]>([])
 const loading = ref(false)
@@ -222,7 +241,9 @@ const handleGenerate = async () => {
 
   generating.value = true
   try {
-    const result = await window.electronAPI.sshKey?.generate?.(generateForm.value)
+    // 将 Vue Proxy 对象转换为普通对象，避免 IPC 克隆错误
+    const options = JSON.parse(JSON.stringify(generateForm.value))
+    const result = await window.electronAPI.sshKey?.generate?.(options)
     if (result?.success) {
       ElMessage.success('密钥生成成功')
       showGenerateDialog.value = false
@@ -246,7 +267,9 @@ const handleAdd = async () => {
 
   adding.value = true
   try {
-    const result = await window.electronAPI.sshKey?.add?.(addForm.value)
+    // 将 Vue Proxy 对象转换为普通对象，避免 IPC 克隆错误
+    const keyData = JSON.parse(JSON.stringify(addForm.value))
+    const result = await window.electronAPI.sshKey?.add?.(keyData)
     if (result?.success) {
       ElMessage.success('密钥添加成功')
       showAddDialog.value = false
@@ -264,20 +287,22 @@ const handleAdd = async () => {
 
 const handleEdit = async (key: any) => {
   try {
-    const result = await window.electronAPI.sshKey?.get?.(key.id)
-    if (result?.success) {
-      editForm.value = {
-        id: key.id,
-        name: key.name,
-        privateKey: result.data.privateKey || '',
-        publicKey: result.data.publicKey || '',
-        passphrase: '',
-        comment: key.comment || ''
-      }
-      showEditDialog.value = true
-    } else {
-      ElMessage.error('获取密钥详情失败')
+    // 获取私钥内容
+    const privateKeyResult = await window.electronAPI.sshKey?.readPrivateKey?.(key.id)
+    if (!privateKeyResult?.success) {
+      ElMessage.error('获取私钥内容失败')
+      return
     }
+    
+    editForm.value = {
+      id: key.id,
+      name: key.name,
+      privateKey: privateKeyResult.data || '',
+      publicKey: key.publicKey || '',
+      passphrase: '',
+      comment: key.comment || ''
+    }
+    showEditDialog.value = true
   } catch (error: any) {
     ElMessage.error(error.message || '获取密钥详情失败')
   }
@@ -291,13 +316,15 @@ const handleUpdate = async () => {
 
   updating.value = true
   try {
-    const result = await window.electronAPI.sshKey?.update?.(editForm.value.id, {
+    // 将 Vue Proxy 对象转换为普通对象，避免 IPC 克隆错误
+    const updates = {
       name: editForm.value.name,
       privateKey: editForm.value.privateKey,
       publicKey: editForm.value.publicKey,
       passphrase: editForm.value.passphrase,
       comment: editForm.value.comment
-    })
+    }
+    const result = await window.electronAPI.sshKey?.update?.(editForm.value.id, updates)
     if (result?.success) {
       ElMessage.success('密钥更新成功')
       showEditDialog.value = false
@@ -312,7 +339,15 @@ const handleUpdate = async () => {
   }
 }
 
-const handleImport = async () => {
+const handleImportCommand = (command: string) => {
+  if (command === 'single') {
+    handleImportSingle()
+  } else if (command === 'batch') {
+    handleImportBatch()
+  }
+}
+
+const handleImportSingle = async () => {
   try {
     const fileResult = await window.electronAPI.sshKey?.selectPrivateKeyFile?.()
     if (fileResult?.canceled) return
@@ -333,6 +368,66 @@ const handleImport = async () => {
     if (error !== 'cancel') {
       ElMessage.error(error.message || '导入失败')
     }
+  }
+}
+
+const handleImportBatch = async () => {
+  try {
+    const fileResult = await window.electronAPI.sshKey?.selectPrivateKeyFiles?.()
+    if (fileResult?.canceled || !fileResult?.data?.length) return
+
+    const files = fileResult.data as string[]
+    
+    // 显示确认对话框
+    await ElMessageBox.confirm(
+      `即将导入 ${files.length} 个密钥文件，密钥名称将自动从文件名识别。是否继续？`,
+      '批量导入确认',
+      { type: 'info' }
+    )
+
+    const result = await window.electronAPI.sshKey?.importBatch?.(files)
+    if (result?.success) {
+      const results = result.data as { success: boolean; name: string; error?: string }[]
+      const successCount = results.filter(r => r.success).length
+      const failCount = results.filter(r => !r.success).length
+
+      if (failCount === 0) {
+        ElMessage.success(`成功导入 ${successCount} 个密钥`)
+      } else {
+        // 显示详细结果
+        const failedItems = results.filter(r => !r.success)
+        ElMessage.warning(`导入完成：成功 ${successCount} 个，失败 ${failCount} 个`)
+        
+        // 显示失败详情
+        if (failedItems.length > 0) {
+          const failedNames = failedItems.map(f => `${f.name}: ${f.error}`).join('\n')
+          ElMessageBox.alert(failedNames, '导入失败的密钥', { type: 'warning' })
+        }
+      }
+      loadKeys()
+    } else {
+      ElMessage.error(result?.error || '批量导入失败')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '批量导入失败')
+    }
+  }
+}
+
+// 保留旧方法名以兼容
+const handleImport = handleImportSingle
+
+const handleCopyPublicKey = async (key: any) => {
+  try {
+    if (!key.publicKey || key.publicKey === 'Public key not available' || key.publicKey === 'Public key not provided') {
+      ElMessage.warning('该密钥没有可用的公钥')
+      return
+    }
+    await navigator.clipboard.writeText(key.publicKey)
+    ElMessage.success('公钥已复制到剪贴板')
+  } catch (error: any) {
+    ElMessage.error('复制失败')
   }
 }
 
@@ -423,5 +518,12 @@ const formatDate = (date: string) => {
 
 .panel-content :deep(.el-table) {
   width: 100%;
+}
+
+.action-buttons {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  white-space: nowrap;
 }
 </style>

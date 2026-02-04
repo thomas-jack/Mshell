@@ -198,6 +198,40 @@ export function registerSSHKeyHandlers() {
     }
   })
 
+  // Select multiple private key files (for batch import)
+  ipcMain.handle('sshKey:selectPrivateKeyFiles', async () => {
+    try {
+      const result = await dialog.showOpenDialog({
+        title: '选择私钥文件（可多选）',
+        filters: [
+          { name: 'Private Key', extensions: ['pem', 'key', '*'] },
+          { name: 'All Files', extensions: ['*'] }
+        ],
+        properties: ['openFile', 'multiSelections']
+      })
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, canceled: true }
+      }
+
+      return { success: true, data: result.filePaths }
+    } catch (error) {
+      console.error('Failed to select private key files:', error)
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  // Batch import keys
+  ipcMain.handle('sshKey:importBatch', async (_event, files: string[]) => {
+    try {
+      const results = sshKeyManager.importKeysBatch(files)
+      return { success: true, data: results }
+    } catch (error) {
+      console.error('Failed to batch import keys:', error)
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
   // Select export path
   ipcMain.handle('sshKey:selectExportPath', async (_event, defaultName: string) => {
     try {

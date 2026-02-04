@@ -9,6 +9,29 @@
         <span class="status-text">{{ connectionStatus }}</span>
       </div>
       <div class="header-actions">
+        <el-tooltip content="字体" placement="bottom">
+          <el-dropdown @command="handleFontChange" trigger="click">
+            <el-button
+              type="primary"
+              link
+              class="action-btn font-btn"
+            >
+              <span style="font-size: 12px; font-weight: 500;">A</span>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  v-for="font in fontOptions"
+                  :key="font.value"
+                  :command="font.value"
+                  :class="{ 'is-active': currentFont === font.value }"
+                >
+                  {{ font.label }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </el-tooltip>
         <el-tooltip content="主题" placement="bottom">
           <el-dropdown @command="handleThemeChange" trigger="click">
             <el-button
@@ -70,6 +93,16 @@
             :class="{ 'is-active': showMonitor }"
           />
         </el-tooltip>
+        <el-tooltip :content="showFilePanel ? '关闭文件' : '文件管理'" placement="bottom">
+          <el-button
+            type="primary"
+            link
+            :icon="FolderOpened"
+            @click="toggleFilePanel"
+            class="action-btn"
+            :class="{ 'is-active': showFilePanel }"
+          />
+        </el-tooltip>
         <el-tooltip :content="showTerminalAI ? '关闭 AI 助手' : 'AI 助手'" placement="bottom">
           <el-button
             type="primary"
@@ -78,15 +111,6 @@
             @click="showTerminalAI = !showTerminalAI"
             class="action-btn"
             :class="{ 'is-active': showTerminalAI }"
-          />
-        </el-tooltip>
-        <el-tooltip v-if="!hideCloseButton" content="Disconnect" placement="bottom">
-          <el-button
-            type="danger"
-            link
-            :icon="Close"
-            @click="handleClose"
-            class="action-btn close-btn"
           />
         </el-tooltip>
       </div>
@@ -137,7 +161,7 @@
     </transition>
     
     <div class="terminal-body">
-      <div class="terminal-content" :class="{ 'with-monitor': showMonitor, 'with-history': showCommandHistory, 'with-ai': showTerminalAI, 'with-snippet': showSnippetDialog }">
+      <div class="terminal-content" :class="{ 'with-monitor': showMonitor, 'with-history': showCommandHistory, 'with-ai': showTerminalAI, 'with-file': showFilePanel, 'with-snippet': showSnippetDialog }">
         <TerminalView
           v-if="isConnected"
           :connection-id="connectionId"
@@ -226,6 +250,19 @@
             :storage-id="aiStorageId"
             :current-dir="currentWorkingDir"
             @close="showTerminalAI = false"
+          />
+        </div>
+      </transition>
+      
+      <!-- 文件管理面板 -->
+      <transition name="slide-left">
+        <div v-if="showFilePanel" class="file-sidebar">
+          <TerminalFilePanel
+            :connection-id="connectionId"
+            :session-name="session?.name"
+            :current-dir="currentWorkingDir"
+            @close="showFilePanel = false"
+            @request-current-dir="updateCurrentWorkingDir"
           />
         </div>
       </transition>
@@ -345,7 +382,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { Close, Loading, Search, Document, Brush, Monitor, Clock, ChatDotRound, CircleClose } from '@element-plus/icons-vue'
+import { Close, Loading, Search, Document, Brush, Monitor, Clock, ChatDotRound, CircleClose, FolderOpened } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TerminalView from './TerminalView.vue'
 import TerminalSearch from './TerminalSearch.vue'
@@ -353,6 +390,7 @@ import CommandAutocomplete from './CommandAutocomplete.vue'
 import CommandHistoryPanel from './CommandHistoryPanel.vue'
 import ServerMonitorPanel from '../Monitor/ServerMonitorPanel.vue'
 import TerminalAIChatPanel from '../AI/TerminalAIChatPanel.vue'
+import TerminalFilePanel from './TerminalFilePanel.vue'
 import GhostText from './GhostText.vue'
 import AICommandSuggest from './AICommandSuggest.vue'
 import CommandExplain from './CommandExplain.vue'
@@ -420,6 +458,7 @@ const showVariableDialog = ref(false)
 const showMonitor = ref(false)
 const showCommandHistory = ref(false)
 const showTerminalAI = ref(false)
+const showFilePanel = ref(false)
 const snippetSearch = ref('')
 const filterCategory = ref('')
 const filterTags = ref<string[]>([])
@@ -460,6 +499,26 @@ let ghostTextRequestId = 0
 // 当前工作目录（从终端提示符解析）- 备用方案
 const currentWorkingDir = ref('')
 
+// 更新当前工作目录
+const updateCurrentWorkingDir = () => {
+  const cwd = terminalManager.getCurrentWorkingDirectory(props.connectionId)
+  if (cwd) {
+    currentWorkingDir.value = cwd
+    console.log('[TerminalTab] Updated currentWorkingDir:', cwd)
+  } else {
+    console.log('[TerminalTab] Could not detect currentWorkingDir from terminal')
+  }
+}
+
+// 切换文件面板（打开时更新当前目录）
+const toggleFilePanel = () => {
+  if (!showFilePanel.value) {
+    // 打开面板前，获取当前工作目录
+    updateCurrentWorkingDir()
+  }
+  showFilePanel.value = !showFilePanel.value
+}
+
 // 搜索相关状态
 const currentSearchTerm = ref('')
 const currentSearchOptions = ref({ caseSensitive: false, regex: false })
@@ -467,6 +526,19 @@ const currentSearchOptions = ref({ caseSensitive: false, regex: false })
 // 主题相关
 const availableThemes = themes
 const currentTheme = computed(() => props.terminalOptions?.theme || 'dark')
+
+// 字体相关
+const fontOptions = [
+  { label: 'JetBrains Mono', value: "'JetBrains Mono', monospace" },
+  { label: 'Fira Code', value: "'Fira Code', monospace" },
+  { label: 'Cascadia Code', value: "'Cascadia Code', monospace" },
+  { label: 'Source Code Pro', value: "'Source Code Pro', monospace" },
+  { label: 'Consolas', value: 'Consolas, monospace' },
+  { label: 'Courier New', value: "'Courier New', monospace" },
+  { label: 'Lucida Console', value: "'Lucida Console', monospace" },
+  { label: 'Monaco', value: 'Monaco, monospace' }
+]
+const currentFont = computed(() => props.terminalOptions?.fontFamily || "'JetBrains Mono', monospace")
 
 // 键盘事件清理函数（在顶层定义，供 onUnmounted 使用）
 let cleanupKeyboard: (() => void) | null = null
@@ -1036,12 +1108,32 @@ const handleClose = () => {
   emit('close', props.connectionId)
 }
 
+const handleFontChange = async (fontFamily: string) => {
+  try {
+    // 更新 appStore 中的终端选项
+    const appStore = useAppStore()
+    appStore.updateTerminalOptions({ fontFamily })
+
+    // 保存到设置中
+    await window.electronAPI.settings.update({
+      terminal: {
+        fontFamily: fontFamily
+      }
+    })
+
+    // 获取字体显示名称
+    const fontLabel = fontOptions.find(f => f.value === fontFamily)?.label || fontFamily
+    ElMessage.success(`字体已切换到 ${fontLabel}`)
+  } catch (error: any) {
+    ElMessage.error(`切换字体失败: ${error.message}`)
+  }
+}
+
 const handleThemeChange = async (themeName: string) => {
   try {
-    // 更新终端选项中的主题
-    if (props.terminalOptions) {
-      props.terminalOptions.theme = themeName
-    }
+    // 更新 appStore 中的终端选项
+    const appStore = useAppStore()
+    appStore.updateTerminalOptions({ theme: themeName })
 
     // 保存到设置中
     await window.electronAPI.settings.update({
@@ -1696,6 +1788,10 @@ defineExpose({
   color: var(--primary-color);
 }
 
+.font-btn {
+  font-family: serif;
+}
+
 .close-btn:hover {
   background-color: rgba(239, 68, 68, 0.1);
   color: var(--error-color);
@@ -1718,6 +1814,10 @@ defineExpose({
 }
 
 .terminal-content.with-ai {
+  flex: 1;
+}
+
+.terminal-content.with-file {
   flex: 1;
 }
 
@@ -1750,6 +1850,16 @@ defineExpose({
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+}
+
+.file-sidebar {
+  width: 320px;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* 滑动动画 */

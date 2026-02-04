@@ -8,6 +8,7 @@ import { FitAddon } from 'xterm-addon-fit'
 import { WebglAddon } from 'xterm-addon-webgl'
 import { SearchAddon } from 'xterm-addon-search'
 import { WebLinksAddon } from 'xterm-addon-web-links'
+import { terminalShortcutsManager } from './terminal-shortcuts'
 
 // 输入回调类型
 export type InputCallback = (data: string, lineBuffer: string) => void
@@ -27,6 +28,8 @@ interface TerminalInstance {
   cursorCallback: ((position: { x: number; y: number }) => void) | null
   dataCallback: ((data: string) => void) | null
   outputCallback: ((data: string) => void) | null // SSH 输出回调（用于错误检测等）
+  copyOnSelect: boolean // 选中自动复制
+  selectionDisposable?: { dispose: () => void } // 选中事件监听器
 }
 
 class TerminalManager {
@@ -60,7 +63,7 @@ class TerminalManager {
 
     const terminal = new Terminal({
       fontSize: options.fontSize || 14,
-      fontFamily: options.fontFamily || 'Consolas, "Courier New", monospace',
+      fontFamily: options.fontFamily || "'JetBrains Mono', monospace",
       cursorStyle: options.cursorStyle || 'block',
       cursorBlink: options.cursorBlink !== false,
       scrollback: options.scrollback || 10000,
@@ -74,13 +77,13 @@ class TerminalManager {
       disableStdin: false
     })
 
-    // 注册自定义按键处理器 (Ctrl+Shift+C/V/A)
+    // 注册自定义按键处理器 (使用可配置的快捷键)
     // 移入 Manager 统一管理，避免 View 组件重复注册导致重复触发
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true
 
-      // Ctrl+Shift+C: Copy
-      if (event.ctrlKey && event.shiftKey && (event.key === 'C' || event.code === 'KeyC')) {
+      // 终端复制 (默认 Ctrl+Shift+C)
+      if (terminalShortcutsManager.matches(event, 'copy')) {
         const selection = terminal.getSelection()
         if (selection) {
           navigator.clipboard.writeText(selection)
@@ -89,8 +92,8 @@ class TerminalManager {
         return false
       }
 
-      // Ctrl+Shift+V: Paste
-      if (event.ctrlKey && event.shiftKey && (event.key === 'V' || event.code === 'KeyV')) {
+      // 终端粘贴 (默认 Ctrl+Shift+V)
+      if (terminalShortcutsManager.matches(event, 'paste')) {
         event.preventDefault()
         event.stopPropagation()
 
@@ -109,14 +112,14 @@ class TerminalManager {
         return false
       }
 
-      // Ctrl+Shift+A: Select All
-      if (event.ctrlKey && event.shiftKey && (event.key === 'A' || event.code === 'KeyA')) {
+      // 终端全选 (默认 Ctrl+Shift+A)
+      if (terminalShortcutsManager.matches(event, 'selectAll')) {
         terminal.selectAll()
         return false
       }
 
-      // Ctrl+L: Clear handled by xterm/shell
-      if (event.ctrlKey && (event.key === 'l' || event.key === 'L')) {
+      // 清屏 (默认 Ctrl+L) - 让 shell 处理
+      if (terminalShortcutsManager.matches(event, 'clear')) {
         return true
       }
 
@@ -177,7 +180,13 @@ class TerminalManager {
       inputCallback: null,
       cursorCallback: null,
       dataCallback: null,
-      outputCallback: null
+      outputCallback: null,
+      copyOnSelect: options.copyOnSelect || false
+    }
+
+    // 设置选中自动复制
+    if (options.copyOnSelect) {
+      this.setupCopyOnSelect(instance)
     }
 
     // 注册 SSH 事件监听器 (Data Layer)
@@ -345,6 +354,57 @@ class TerminalManager {
   }
 
   /**
+   * 设置选中自动复制功能
+   */
+  private setupCopyOnSelect(instance: TerminalInstance): void {
+    // 先清理旧的监听器
+    if (instance.selectionDisposable) {
+      instance.selectionDisposable.dispose()
+    }
+
+    // 监听选中变化事件
+    instance.selectionDisposable = instance.terminal.onSelectionChange(() => {
+      if (instance.copyOnSelect) {
+        const selection = instance.terminal.getSelection()
+        if (selection && selection.trim()) {
+          navigator.clipboard.writeText(selection).then(() => {
+            console.log(`[TerminalManager] Auto-copied selection: ${selection.substring(0, 50)}...`)
+          }).catch(err => {
+            console.error('[TerminalManager] Failed to auto-copy selection:', err)
+          })
+        }
+      }
+    })
+  }
+
+  /**
+   * 设置或更新选中自动复制选项
+   */
+  setCopyOnSelect(connectionId: string, enabled: boolean): void {
+    const instance = this.instances.get(connectionId)
+    if (instance) {
+      instance.copyOnSelect = enabled
+      if (enabled && !instance.selectionDisposable) {
+        this.setupCopyOnSelect(instance)
+      }
+      console.log(`[TerminalManager] setCopyOnSelect for ${connectionId}: ${enabled}`)
+    }
+  }
+
+  /**
+   * 更新所有终端的选中自动复制设置
+   */
+  updateAllCopyOnSelect(enabled: boolean): void {
+    for (const [connectionId, instance] of this.instances) {
+      instance.copyOnSelect = enabled
+      if (enabled && !instance.selectionDisposable) {
+        this.setupCopyOnSelect(instance)
+      }
+      console.log(`[TerminalManager] Updated copyOnSelect for ${connectionId}: ${enabled}`)
+    }
+  }
+
+  /**
    * 从终端 buffer 中解析当前工作目录
    * 通过读取最后几行并匹配提示符格式来获取
    */
@@ -356,8 +416,10 @@ class TerminalManager {
     const buffer = terminal.buffer.active
 
     // 从最后一行往前搜索，找到包含提示符的行
-    const linesToCheck = 10
+    const linesToCheck = 20
     const currentLine = buffer.cursorY + buffer.viewportY
+
+    console.log(`[TerminalManager] getCurrentWorkingDirectory: checking lines from ${currentLine}, viewportY=${buffer.viewportY}, cursorY=${buffer.cursorY}`)
 
     for (let i = currentLine; i >= Math.max(0, currentLine - linesToCheck); i--) {
       const line = buffer.getLine(i)
@@ -366,30 +428,49 @@ class TerminalManager {
       const lineText = line.translateToString(true)
       if (!lineText.trim()) continue
 
+      console.log(`[TerminalManager] Line ${i}: "${lineText}"`)
+
       // 尝试匹配常见的提示符格式
       // 格式1: user@host:path$ 或 user@host:path#
-      // 例如: root@VM-16-9-debian:~/Nextnotebook/scripts#
-      const match1 = lineText.match(/[\w-]+@[\w.-]+:([~\/][^\s$#]*)[#$]\s*$/)
+      // 例如: root@VM-16-9-debian:~/gin-vue-weapp#
+      // 注意：路径可能包含 - . _ 等字符，使用更宽松的匹配
+      const match1 = lineText.match(/[\w-]+@[\w.-]+:([~\/][^\s#$]*)[#$]\s*$/)
       if (match1 && match1[1]) {
-        console.log(`[TerminalManager] Detected cwd from prompt: ${match1[1]}`)
-        return match1[1].trim()
+        const cwd = match1[1].trim()
+        console.log(`[TerminalManager] Detected cwd from prompt (format1): ${cwd}`)
+        return cwd
+      }
+
+      // 格式1b: 提示符可能在行中间（前面有其他输出）
+      // 例如: "some output root@VM-16-9-debian:~/gin-vue-weapp#"
+      const match1b = lineText.match(/([\w-]+@[\w.-]+):([~\/][^\s#$]*)[#$]\s*$/)
+      if (match1b && match1b[2]) {
+        const cwd = match1b[2].trim()
+        console.log(`[TerminalManager] Detected cwd from prompt (format1b): ${cwd}`)
+        return cwd
       }
 
       // 格式2: [user@host path]$ 
       const match2 = lineText.match(/\[[\w-]+@[\w.-]+\s+([~\/][^\]]*)\][#$]\s*$/)
       if (match2 && match2[1]) {
-        console.log(`[TerminalManager] Detected cwd from prompt: ${match2[1]}`)
-        return match2[1].trim()
+        const cwd = match2[1].trim()
+        console.log(`[TerminalManager] Detected cwd from prompt (format2): ${cwd}`)
+        return cwd
       }
 
       // 格式3: path$ 或 path# (简化的提示符)
-      const match3 = lineText.match(/^([~\/][\w\/.-]*)[#$%>]\s*$/)
+      const match3 = lineText.match(/^([~\/][\w\/._-]*)[#$%>]\s*$/)
       if (match3 && match3[1]) {
-        console.log(`[TerminalManager] Detected cwd from prompt: ${match3[1]}`)
-        return match3[1].trim()
+        const cwd = match3[1].trim()
+        console.log(`[TerminalManager] Detected cwd from prompt (format3): ${cwd}`)
+        return cwd
       }
+
+      // 格式4: PS1 可能只显示最后一级目录名
+      // 例如: "gin-vue-weapp#" - 这种情况无法获取完整路径，跳过
     }
 
+    console.log(`[TerminalManager] getCurrentWorkingDirectory: no match found`)
     return null
   }
 
@@ -413,6 +494,11 @@ class TerminalManager {
           }
         }
         instance.unsubscribers = []
+      }
+
+      // 清理选中事件监听器
+      if (instance.selectionDisposable) {
+        instance.selectionDisposable.dispose()
       }
 
       instance.searchAddon?.dispose()

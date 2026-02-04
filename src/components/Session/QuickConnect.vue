@@ -1,7 +1,7 @@
 <template>
-  <el-dialog v-model="visible" title="Quick Connect" width="500px">
+  <el-dialog v-model="visible" title="快速连接" width="500px">
     <el-form :model="form" :rules="rules" ref="formRef" label-width="100px">
-      <el-form-item label="Host" prop="host">
+      <el-form-item label="主机" prop="host">
         <el-input
           v-model="form.host"
           placeholder="user@host:port"
@@ -9,16 +9,16 @@
         />
         <template #extra>
           <span style="font-size: 12px; color: #999">
-            Format: username@hostname:port (port is optional, default 22)
+            格式: 用户名@主机名:端口 (端口可选，默认 22)
           </span>
         </template>
       </el-form-item>
 
-      <el-form-item label="Password" prop="password">
+      <el-form-item label="密码" prop="password">
         <el-input
           v-model="form.password"
           type="password"
-          placeholder="Enter password"
+          placeholder="输入密码"
           show-password
           @keyup.enter="handleConnect"
         />
@@ -26,8 +26,8 @@
     </el-form>
 
     <template #footer>
-      <el-button @click="visible = false">Cancel</el-button>
-      <el-button type="primary" @click="handleConnect">Connect</el-button>
+      <el-button @click="visible = false">取消</el-button>
+      <el-button type="primary" @click="handleConnect">连接</el-button>
     </template>
   </el-dialog>
 </template>
@@ -57,8 +57,8 @@ const form = reactive({
 })
 
 const rules: FormRules = {
-  host: [{ required: true, message: 'Please enter host', trigger: 'blur' }],
-  password: [{ required: true, message: 'Please enter password', trigger: 'blur' }]
+  host: [{ required: true, message: '请输入主机地址', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
 }
 
 watch(

@@ -8,6 +8,7 @@ import { Terminal } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { getTheme } from '@/utils/terminal-themes'
 import { terminalManager } from '@/utils/terminal-manager'
+import { terminalShortcutsManager } from '@/utils/terminal-shortcuts'
 import { useAIStore } from '@/stores/ai'
 import { ElMessage } from 'element-plus'
 import 'xterm/css/xterm.css'
@@ -32,7 +33,7 @@ const props = withDefaults(defineProps<Props>(), {
   sessionName: 'Unknown Session',
   options: () => ({
     fontSize: 14,
-    fontFamily: 'Consolas, "Courier New", monospace',
+    fontFamily: "'JetBrains Mono', monospace",
     cursorStyle: 'block',
     cursorBlink: true,
     scrollback: 10000,
@@ -246,14 +247,14 @@ onMounted(() => {
       if (selection) {
         menuItems.push({
           label: '复制',
-          accelerator: 'Ctrl+Shift+C',
+          accelerator: terminalShortcutsManager.format('copy'),
           action: 'copy'
         })
       }
       
       menuItems.push({
         label: '粘贴',
-        accelerator: 'Ctrl+Shift+V',
+        accelerator: terminalShortcutsManager.format('paste'),
         action: 'paste'
       })
       
@@ -261,13 +262,13 @@ onMounted(() => {
       
       menuItems.push({
         label: '全选',
-        accelerator: 'Ctrl+Shift+A',
+        accelerator: terminalShortcutsManager.format('selectAll'),
         action: 'selectAll'
       })
       
       menuItems.push({
         label: '清屏',
-        accelerator: 'Ctrl+L',
+        accelerator: terminalShortcutsManager.format('clear'),
         action: 'clear'
       })
       
@@ -509,6 +510,11 @@ watch(
       terminal.options.theme = typeof newOptions.theme === 'string'
         ? getTheme(newOptions.theme)
         : newOptions.theme
+    }
+    
+    // 更新选中自动复制设置
+    if (newOptions.copyOnSelect !== undefined) {
+      terminalManager.setCopyOnSelect(props.connectionId, newOptions.copyOnSelect)
     }
 
     // Refit after options change

@@ -341,12 +341,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     generate: (options: any) => ipcRenderer.invoke('sshKey:generate', options),
     add: (keyData: any) => ipcRenderer.invoke('sshKey:add', keyData),
     import: (name: string, privateKeyPath: string, passphrase?: string) => ipcRenderer.invoke('sshKey:import', name, privateKeyPath, passphrase),
+    importBatch: (files: string[]) => ipcRenderer.invoke('sshKey:importBatch', files),
     export: (id: string, exportPath: string) => ipcRenderer.invoke('sshKey:export', id, exportPath),
     update: (id: string, updates: any) => ipcRenderer.invoke('sshKey:update', id, updates),
     delete: (id: string) => ipcRenderer.invoke('sshKey:delete', id),
     readPrivateKey: (id: string) => ipcRenderer.invoke('sshKey:readPrivateKey', id),
     getStatistics: () => ipcRenderer.invoke('sshKey:getStatistics'),
     selectPrivateKeyFile: () => ipcRenderer.invoke('sshKey:selectPrivateKeyFile'),
+    selectPrivateKeyFiles: () => ipcRenderer.invoke('sshKey:selectPrivateKeyFiles'),
     selectExportPath: (defaultName: string) => ipcRenderer.invoke('sshKey:selectExportPath', defaultName)
   },
 

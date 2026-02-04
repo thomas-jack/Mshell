@@ -166,10 +166,14 @@
               </el-form-item>
               <el-form-item label="字体">
                 <el-select v-model="settings.terminal.fontFamily" style="width: 300px">
-                  <el-option label="JetBrains Mono" value="JetBrains Mono" />
-                  <el-option label="Fira Code" value="Fira Code" />
-                  <el-option label="Consolas" value="Consolas" />
-                  <el-option label="Monaco" value="Monaco" />
+                  <el-option label="JetBrains Mono" value="'JetBrains Mono', monospace" />
+                  <el-option label="Fira Code" value="'Fira Code', monospace" />
+                  <el-option label="Cascadia Code" value="'Cascadia Code', monospace" />
+                  <el-option label="Source Code Pro" value="'Source Code Pro', monospace" />
+                  <el-option label="Consolas" value="Consolas, monospace" />
+                  <el-option label="Courier New" value="'Courier New', monospace" />
+                  <el-option label="Lucida Console" value="'Lucida Console', monospace" />
+                  <el-option label="Monaco" value="Monaco, monospace" />
                 </el-select>
               </el-form-item>
               <el-form-item label="配色方案">
@@ -207,6 +211,10 @@
                   :max="50000"
                   :step="1000"
                 />
+              </el-form-item>
+              <el-form-item label="选中自动复制">
+                <el-switch v-model="settings.terminal.copyOnSelect" />
+                <span class="form-hint">选中终端文本时自动复制到剪贴板</span>
               </el-form-item>
             </el-form>
           </div>
@@ -460,6 +468,38 @@
             </div>
           </div>
 
+          <!-- 终端快捷键 -->
+          <div class="settings-section">
+            <h3>终端快捷键</h3>
+            <el-alert 
+              type="info" 
+              :closable="false"
+              show-icon
+              style="margin-bottom: 16px"
+            >
+              <template #title>
+                以下快捷键仅在终端窗口中生效
+              </template>
+            </el-alert>
+            
+            <div class="shortcuts-list">
+              <div v-for="(shortcut, id) in terminalShortcuts" :key="id" class="shortcut-item">
+                <div class="shortcut-info">
+                  <span class="shortcut-name">{{ shortcut.description }}</span>
+                  <span class="shortcut-key">{{ formatTerminalShortcutKey(id) }}</span>
+                </div>
+                <div class="shortcut-actions">
+                  <el-button size="small" @click="editTerminalShortcut(id, shortcut)">
+                    修改
+                  </el-button>
+                  <el-button size="small" @click="resetTerminalShortcut(id)">
+                    重置
+                  </el-button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="settings-section">
             <h3>快捷键说明</h3>
             <el-alert type="info" :closable="false">
@@ -477,18 +517,16 @@
         <!-- 更新设置 -->
         <el-tab-pane label="更新" name="updates">
           <div class="settings-section">
-            <h3>自动更新</h3>
+            <h3>版本更新</h3>
             <el-form label-position="left">
-              <el-form-item label="自动检查更新">
-                <el-switch v-model="settings.updates.autoCheck" />
-              </el-form-item>
-              <el-form-item label="自动下载更新">
-                <el-switch v-model="settings.updates.autoDownload" />
-              </el-form-item>
-              <el-form-item label="手动检查">
-                <el-button :icon="Refresh" @click="checkForUpdates">
-                  立即检查
-                </el-button>
+              <el-form-item label="查看最新版本">
+                <el-link 
+                  type="primary" 
+                  href="https://github.com/inspoaibox/Mshell/releases" 
+                  target="_blank"
+                >
+                  https://github.com/inspoaibox/Mshell/releases
+                </el-link>
               </el-form-item>
             </el-form>
           </div>
@@ -571,6 +609,49 @@
       <template #footer>
         <el-button @click="showEditShortcutDialog = false">取消</el-button>
         <el-button type="primary" @click="saveShortcut" :disabled="!!shortcutConflict">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑终端快捷键对话框 -->
+    <el-dialog v-model="showEditTerminalShortcutDialog" title="编辑终端快捷键" width="500px">
+      <el-form label-position="top">
+        <el-form-item label="功能">
+          <el-input :model-value="editingTerminalShortcut.description" disabled />
+        </el-form-item>
+        <el-form-item label="快捷键">
+          <div class="shortcut-input">
+            <el-input 
+              v-model="editingTerminalShortcutKey" 
+              placeholder="按下快捷键组合..."
+              readonly
+              @keydown="captureTerminalShortcut"
+            />
+            <el-button @click="clearTerminalShortcutInput">清除</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox-group v-model="editingTerminalModifiers">
+            <el-checkbox label="ctrl">Ctrl</el-checkbox>
+            <el-checkbox label="alt">Alt</el-checkbox>
+            <el-checkbox label="shift">Shift</el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+        <el-alert 
+          v-if="terminalShortcutConflict"
+          type="warning" 
+          :closable="false"
+          show-icon
+        >
+          <template #title>
+            该快捷键已被占用: {{ terminalShortcutConflict }}
+          </template>
+        </el-alert>
+      </el-form>
+      <template #footer>
+        <el-button @click="showEditTerminalShortcutDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveTerminalShortcut" :disabled="!!terminalShortcutConflict">
           保存
         </el-button>
       </template>
@@ -763,6 +844,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Upload, Refresh, Plus, Edit, Lock, Unlock } from '@element-plus/icons-vue'
 import { themes } from '@/utils/terminal-themes'
 import { keyboardShortcutManager, type ShortcutConfig } from '@/utils/keyboard-shortcuts'
+import { terminalShortcutsManager, type TerminalShortcut, type TerminalShortcutsConfig } from '@/utils/terminal-shortcuts'
 import LanguageSwitcher from './LanguageSwitcher.vue'
 import AISettingsPanel from '../AI/AISettingsPanel.vue'
 import logoImg from '@/assets/logo.png'
@@ -786,12 +868,13 @@ const settings = ref({
   },
   terminal: {
     fontSize: 14,
-    fontFamily: 'JetBrains Mono',
+    fontFamily: "'JetBrains Mono', monospace",
     cursorStyle: 'block' as 'block' | 'underline' | 'bar',
     cursorBlink: true,
     scrollback: 10000,
     theme: 'dark',
-    rendererType: 'auto' as 'auto' | 'webgl' | 'canvas' | 'dom'
+    rendererType: 'auto' as 'auto' | 'webgl' | 'canvas' | 'dom',
+    copyOnSelect: false
   },
   ssh: {
     timeout: 30,
@@ -875,6 +958,21 @@ const editingShortcut = ref<ShortcutConfig>({
 const editingShortcutKey = ref('')
 const editingModifiers = ref<string[]>([])
 const shortcutConflict = ref('')
+
+// 终端快捷键相关状态
+const terminalShortcuts = ref<TerminalShortcutsConfig>(terminalShortcutsManager.getAll())
+const showEditTerminalShortcutDialog = ref(false)
+const editingTerminalShortcutId = ref<keyof TerminalShortcutsConfig>('copy')
+const editingTerminalShortcut = ref<TerminalShortcut>({
+  key: '',
+  ctrl: false,
+  alt: false,
+  shift: false,
+  description: ''
+})
+const editingTerminalShortcutKey = ref('')
+const editingTerminalModifiers = ref<string[]>([])
+const terminalShortcutConflict = ref('')
 
 // 默认快捷键配置
 const defaultShortcuts: Record<string, Omit<ShortcutConfig, 'action'>> = {
@@ -1459,6 +1557,126 @@ const saveShortcutSettings = async () => {
   } catch (error) {
     console.error('Failed to save shortcut settings:', error)
   }
+}
+
+// 终端快捷键相关函数
+const formatTerminalShortcutKey = (id: keyof TerminalShortcutsConfig) => {
+  return terminalShortcutsManager.format(id)
+}
+
+const editTerminalShortcut = (id: string, shortcut: TerminalShortcut) => {
+  editingTerminalShortcutId.value = id as keyof TerminalShortcutsConfig
+  editingTerminalShortcut.value = { ...shortcut }
+  editingTerminalShortcutKey.value = shortcut.key
+  
+  const modifiers: string[] = []
+  if (shortcut.ctrl) modifiers.push('ctrl')
+  if (shortcut.alt) modifiers.push('alt')
+  if (shortcut.shift) modifiers.push('shift')
+  editingTerminalModifiers.value = modifiers
+  
+  terminalShortcutConflict.value = ''
+  showEditTerminalShortcutDialog.value = true
+}
+
+const captureTerminalShortcut = (event: KeyboardEvent) => {
+  event.preventDefault()
+  event.stopPropagation()
+  
+  // 忽略单独的修饰键
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) {
+    return
+  }
+  
+  // 使用 event.code 来获取物理按键
+  const codeToKey: Record<string, string> = {
+    'KeyA': 'A', 'KeyB': 'B', 'KeyC': 'C', 'KeyD': 'D', 'KeyE': 'E',
+    'KeyF': 'F', 'KeyG': 'G', 'KeyH': 'H', 'KeyI': 'I', 'KeyJ': 'J',
+    'KeyK': 'K', 'KeyL': 'L', 'KeyM': 'M', 'KeyN': 'N', 'KeyO': 'O',
+    'KeyP': 'P', 'KeyQ': 'Q', 'KeyR': 'R', 'KeyS': 'S', 'KeyT': 'T',
+    'KeyU': 'U', 'KeyV': 'V', 'KeyW': 'W', 'KeyX': 'X', 'KeyY': 'Y',
+    'KeyZ': 'Z'
+  }
+  
+  const key = codeToKey[event.code] || event.key.toUpperCase()
+  editingTerminalShortcutKey.value = key
+  
+  const modifiers: string[] = []
+  if (event.ctrlKey || event.metaKey) modifiers.push('ctrl')
+  if (event.altKey) modifiers.push('alt')
+  if (event.shiftKey) modifiers.push('shift')
+  editingTerminalModifiers.value = modifiers
+  
+  checkTerminalShortcutConflict()
+}
+
+const clearTerminalShortcutInput = () => {
+  editingTerminalShortcutKey.value = ''
+  editingTerminalModifiers.value = []
+  terminalShortcutConflict.value = ''
+}
+
+const checkTerminalShortcutConflict = () => {
+  if (!editingTerminalShortcutKey.value) {
+    terminalShortcutConflict.value = ''
+    return
+  }
+  
+  const newConfig = {
+    key: editingTerminalShortcutKey.value,
+    ctrl: editingTerminalModifiers.value.includes('ctrl'),
+    alt: editingTerminalModifiers.value.includes('alt'),
+    shift: editingTerminalModifiers.value.includes('shift')
+  }
+  
+  // 检查与其他终端快捷键的冲突
+  for (const [id, shortcut] of Object.entries(terminalShortcuts.value)) {
+    if (id === editingTerminalShortcutId.value) continue
+    
+    if (
+      shortcut.key.toUpperCase() === newConfig.key.toUpperCase() &&
+      shortcut.ctrl === newConfig.ctrl &&
+      shortcut.alt === newConfig.alt &&
+      shortcut.shift === newConfig.shift
+    ) {
+      terminalShortcutConflict.value = shortcut.description
+      return
+    }
+  }
+  
+  terminalShortcutConflict.value = ''
+}
+
+const saveTerminalShortcut = () => {
+  if (!editingTerminalShortcutKey.value) {
+    ElMessage.warning('请设置快捷键')
+    return
+  }
+  
+  if (terminalShortcutConflict.value) {
+    ElMessage.warning('快捷键冲突，请选择其他组合')
+    return
+  }
+  
+  // 更新终端快捷键管理器
+  terminalShortcutsManager.update(editingTerminalShortcutId.value, {
+    key: editingTerminalShortcutKey.value,
+    ctrl: editingTerminalModifiers.value.includes('ctrl'),
+    alt: editingTerminalModifiers.value.includes('alt'),
+    shift: editingTerminalModifiers.value.includes('shift')
+  })
+  
+  // 更新本地显示
+  terminalShortcuts.value = terminalShortcutsManager.getAll()
+  
+  ElMessage.success('终端快捷键已更新')
+  showEditTerminalShortcutDialog.value = false
+}
+
+const resetTerminalShortcut = (id: string) => {
+  terminalShortcutsManager.reset(id as keyof TerminalShortcutsConfig)
+  terminalShortcuts.value = terminalShortcutsManager.getAll()
+  ElMessage.success('终端快捷键已重置')
 }
 
 // 会话锁定相关函数

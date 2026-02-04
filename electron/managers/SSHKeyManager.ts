@@ -100,6 +100,15 @@ export class SSHKeyManager {
       let publicKey: string
       let privateKey: string
 
+      // 构建私钥编码选项，只有在有密码时才添加加密相关属性
+      const privateKeyEncodingBase = {
+        type: 'pkcs8' as const,
+        format: 'pem' as const
+      }
+      const privateKeyEncoding = options.passphrase 
+        ? { ...privateKeyEncodingBase, cipher: 'aes-256-cbc' as const, passphrase: options.passphrase }
+        : privateKeyEncodingBase
+
       if (options.type === 'rsa') {
         const bits = options.bits || 2048
         const { publicKey: pubKey, privateKey: privKey } = generateKeyPairSync('rsa', {
@@ -108,12 +117,7 @@ export class SSHKeyManager {
             type: 'spki',
             format: 'pem'
           },
-          privateKeyEncoding: {
-            type: 'pkcs8',
-            format: 'pem',
-            cipher: options.passphrase ? 'aes-256-cbc' : undefined,
-            passphrase: options.passphrase
-          }
+          privateKeyEncoding
         })
         publicKey = pubKey
         privateKey = privKey
@@ -123,12 +127,7 @@ export class SSHKeyManager {
             type: 'spki',
             format: 'pem'
           },
-          privateKeyEncoding: {
-            type: 'pkcs8',
-            format: 'pem',
-            cipher: options.passphrase ? 'aes-256-cbc' : undefined,
-            passphrase: options.passphrase
-          }
+          privateKeyEncoding
         })
         publicKey = pubKey
         privateKey = privKey
@@ -140,12 +139,7 @@ export class SSHKeyManager {
             type: 'spki',
             format: 'pem'
           },
-          privateKeyEncoding: {
-            type: 'pkcs8',
-            format: 'pem',
-            cipher: options.passphrase ? 'aes-256-cbc' : undefined,
-            passphrase: options.passphrase
-          }
+          privateKeyEncoding
         })
         publicKey = pubKey
         privateKey = privKey
@@ -251,6 +245,67 @@ export class SSHKeyManager {
   }
 
   /**
+   * 批量导入密钥
+   * @param files 文件路径数组
+   * @returns 导入结果数组
+   */
+  importKeysBatch(files: string[]): { success: boolean; name: string; error?: string }[] {
+    const results: { success: boolean; name: string; error?: string }[] = []
+
+    for (const filePath of files) {
+      try {
+        // 从文件路径提取文件名作为密钥名称
+        const fileName = filePath.split(/[/\\]/).pop() || 'unknown'
+        // 移除常见的扩展名
+        const keyName = fileName.replace(/\.(pem|key|ppk)$/i, '')
+
+        // 检查是否是公钥文件（跳过，因为会随私钥一起导入）
+        if (fileName.endsWith('.pub')) {
+          continue
+        }
+
+        // 检查文件是否存在
+        if (!existsSync(filePath)) {
+          results.push({ success: false, name: keyName, error: '文件不存在' })
+          continue
+        }
+
+        // 读取文件内容检查是否是有效的私钥
+        const content = readFileSync(filePath, 'utf-8')
+        if (!this.isValidPrivateKey(content)) {
+          results.push({ success: false, name: keyName, error: '不是有效的私钥文件' })
+          continue
+        }
+
+        // 检查是否已存在同名密钥
+        const existingKey = Array.from(this.keys.values()).find(k => k.name === keyName)
+        const finalName = existingKey ? `${keyName}_${Date.now()}` : keyName
+
+        // 导入密钥
+        this.importKey(finalName, filePath)
+        results.push({ success: true, name: finalName })
+      } catch (error) {
+        const fileName = filePath.split(/[/\\]/).pop() || 'unknown'
+        results.push({ success: false, name: fileName, error: (error as Error).message })
+      }
+    }
+
+    return results
+  }
+
+  /**
+   * 检查是否是有效的私钥文件
+   */
+  private isValidPrivateKey(content: string): boolean {
+    return content.includes('PRIVATE KEY') || 
+           content.includes('OPENSSH PRIVATE KEY') ||
+           content.includes('EC PRIVATE KEY') ||
+           content.includes('RSA PRIVATE KEY') ||
+           content.includes('DSA PRIVATE KEY') ||
+           content.includes('ENCRYPTED PRIVATE KEY')
+  }
+
+  /**
    * 手动添加密钥
    */
   addKey(keyData: { name: string; privateKey: string; publicKey?: string; passphrase?: string; comment?: string }): SSHKey {
@@ -338,14 +393,30 @@ export class SSHKeyManager {
   /**
    * 更新密钥信息
    */
-  updateKey(id: string, updates: Partial<Pick<SSHKey, 'name' | 'comment'>>): void {
+  updateKey(id: string, updates: { name?: string; comment?: string; privateKey?: string; publicKey?: string }): void {
     const key = this.keys.get(id)
     if (!key) {
       throw new Error('Key not found')
     }
 
+    // 更新基本信息
     if (updates.name !== undefined) key.name = updates.name
     if (updates.comment !== undefined) key.comment = updates.comment
+
+    // 更新私钥内容
+    if (updates.privateKey !== undefined && updates.privateKey.trim()) {
+      writeFileSync(key.privateKeyPath, updates.privateKey, { mode: 0o600 })
+      // 重新检测密钥类型
+      key.type = this.detectKeyType(updates.privateKey)
+    }
+
+    // 更新公钥内容
+    if (updates.publicKey !== undefined && updates.publicKey.trim()) {
+      const publicKeyPath = `${key.privateKeyPath}.pub`
+      writeFileSync(publicKeyPath, updates.publicKey, { mode: 0o644 })
+      key.publicKey = updates.publicKey
+      key.fingerprint = this.generateFingerprint(updates.publicKey)
+    }
 
     this.saveKeys()
   }

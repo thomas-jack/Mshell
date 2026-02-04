@@ -30,6 +30,9 @@
                 />
               </el-tooltip>
               <el-button type="primary" size="small" :icon="Plus" @click="appStore.showSessionForm = true" circle />
+              <el-tooltip content="批量导入" placement="bottom">
+                <el-button size="small" :icon="Upload" @click="showBatchImport = true" circle />
+              </el-tooltip>
               <el-button size="small" :icon="Lightning" @click="appStore.showQuickConnect = true" circle />
            </div>
         </div>
@@ -294,6 +297,12 @@
       @connect="handleQuickConnectSubmit" 
     />
     
+    <BatchImport
+      v-model="showBatchImport"
+      :groups="appStore.groups"
+      @imported="handleBatchImported"
+    />
+    
     <TerminalSettings
       v-model="appStore.showTerminalSettings"
       :current-settings="appStore.terminalOptions"
@@ -305,7 +314,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Plus, Lightning, Grid, ChatDotRound } from '@element-plus/icons-vue'
+import { Connection, Plus, Lightning, Grid, ChatDotRound, Upload } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 import { useAIStore } from '@/stores/ai'
 import { v4 as uuidv4 } from 'uuid'
@@ -319,6 +328,7 @@ import StatusBar from './components/Common/StatusBar.vue'
 import SessionList from './components/Session/SessionList.vue'
 import SessionForm from './components/Session/SessionForm.vue'
 import QuickConnect from './components/Session/QuickConnect.vue'
+import BatchImport from './components/Session/BatchImport.vue'
 import TerminalTab from './components/Terminal/TerminalTab.vue'
 import SplitTerminalTab from './components/Terminal/SplitTerminalTab.vue'
 import DraggableTab from './components/Terminal/DraggableTab.vue'
@@ -355,6 +365,7 @@ const searchInputRef = ref<HTMLElement | null>(null)
 const showSplitView = ref(false)
 const layoutMode = ref<'auto' | 'horizontal' | 'vertical'>('auto')
 const broadcastMode = ref(false)
+const showBatchImport = ref(false)
 const maximizedPaneId = ref<string | null>(null)
 const terminalTabRefs = ref<any[]>([])
 
@@ -956,6 +967,12 @@ const handleQuickConnectSubmit = (config: {
   }
   
   handleConnect(session)
+}
+
+const handleBatchImported = async (count: number) => {
+  // 重新加载会话列表
+  await appStore.loadSessions()
+  console.log(`[App] Batch imported ${count} sessions`)
 }
 
 const handleEditSession = (session: SessionConfig) => {
