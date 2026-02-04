@@ -32,9 +32,12 @@
                   <el-option label="浅色" value="light" />
                 </el-select>
               </el-form-item>
+              <!-- 语言切换暂时禁用，当前代码大部分为中文硬编码 -->
+              <!--
               <el-form-item label="语言">
                 <LanguageSwitcher />
               </el-form-item>
+              -->
             </el-form>
           </div>
         </el-tab-pane>
@@ -129,8 +132,9 @@
                 <el-input-number v-model="lockConfig.autoLockTimeout" :min="1" :max="120" @change="saveLockConfig" />
                 <span class="form-hint">分钟</span>
               </el-form-item>
-              <el-form-item label="最小化时锁定" v-if="lockConfig.hasPassword">
+              <el-form-item label="关闭到托盘时锁定" v-if="lockConfig.hasPassword">
                 <el-switch v-model="lockConfig.lockOnMinimize" @change="saveLockConfig" />
+                <span class="form-hint">点击关闭按钮隐藏到托盘时自动锁定</span>
               </el-form-item>
               <el-form-item label="休眠时锁定" v-if="lockConfig.hasPassword">
                 <el-switch v-model="lockConfig.lockOnSuspend" @change="saveLockConfig" />
@@ -234,6 +238,52 @@
                   :disabled="!settings.ssh.keepalive"
                 />
                 <span class="form-hint">秒</span>
+              </el-form-item>
+            </el-form>
+          </div>
+          
+          <div class="settings-section">
+            <h3>断线重连</h3>
+            <el-form label-position="left">
+              <el-form-item label="自动重连">
+                <el-switch v-model="settings.ssh.autoReconnect" />
+                <span class="form-hint">连接断开时自动尝试重连</span>
+              </el-form-item>
+              <el-form-item label="最大重连次数">
+                <el-input-number 
+                  v-model="settings.ssh.maxReconnectAttempts" 
+                  :min="1" 
+                  :max="10"
+                  :disabled="!settings.ssh.autoReconnect"
+                />
+                <span class="form-hint">次</span>
+              </el-form-item>
+              <el-form-item label="重连间隔">
+                <el-input-number 
+                  v-model="settings.ssh.reconnectInterval" 
+                  :min="1" 
+                  :max="60"
+                  :disabled="!settings.ssh.autoReconnect"
+                />
+                <span class="form-hint">秒</span>
+              </el-form-item>
+            </el-form>
+          </div>
+          
+          <div class="settings-section">
+            <h3>命令智能</h3>
+            <el-form label-position="left">
+              <el-form-item label="命令补全">
+                <el-switch v-model="settings.ssh.commandAutocomplete" />
+                <span class="form-hint">快捷命令和历史命令自动补全</span>
+              </el-form-item>
+              <el-form-item label="AI 命令建议">
+                <el-switch v-model="settings.ssh.aiCommandSuggest" />
+                <span class="form-hint">输入 # 后使用 AI 生成命令建议</span>
+              </el-form-item>
+              <el-form-item label="命令解释">
+                <el-switch v-model="settings.ssh.commandExplain" />
+                <span class="form-hint">输入 ?命令 或 命令? 查看命令解释</span>
               </el-form-item>
             </el-form>
           </div>
@@ -446,7 +496,7 @@
 
         <!-- AI 助手 -->
         <el-tab-pane label="AI 助手" name="ai">
-          <AISettingsPanel />
+          <AISettingsPanel ref="aiSettingsPanelRef" />
         </el-tab-pane>
 
         <!-- 关于 -->
@@ -627,8 +677,8 @@
           <el-checkbox label="aiConfig" :disabled="!restoreBackupData.aiConfig">
             AI 配置 {{ restoreBackupData.aiConfig ? '✓' : '(无)' }}
           </el-checkbox>
-          <el-checkbox label="aiChatHistory" :disabled="!restoreBackupData.aiChatHistory">
-            AI 聊天历史 ({{ restoreBackupData.aiChatHistory?.length || 0 }} 条)
+          <el-checkbox label="aiChatHistory" :disabled="!restoreBackupData.aiChatHistory && !restoreBackupData.aiTerminalChatHistory">
+            AI 聊天历史 ({{ restoreBackupData.aiChatHistory?.length || 0 }} 条{{ restoreBackupData.aiTerminalChatHistory ? `, ${Object.keys(restoreBackupData.aiTerminalChatHistory).length} 个终端` : '' }})
           </el-checkbox>
         </el-checkbox-group>
         <el-alert 
@@ -717,6 +767,9 @@ import LanguageSwitcher from './LanguageSwitcher.vue'
 import AISettingsPanel from '../AI/AISettingsPanel.vue'
 import logoImg from '@/assets/logo.png'
 
+// AI 设置面板引用
+const aiSettingsPanelRef = ref<InstanceType<typeof AISettingsPanel> | null>(null)
+
 const activeTab = ref('general')
 
 // 主题相关状态
@@ -743,7 +796,13 @@ const settings = ref({
   ssh: {
     timeout: 30,
     keepalive: true,
-    keepaliveInterval: 60
+    keepaliveInterval: 60,
+    autoReconnect: true,
+    maxReconnectAttempts: 3,
+    reconnectInterval: 5,
+    commandAutocomplete: true,
+    aiCommandSuggest: true,
+    commandExplain: true
   },
   sftp: {
     maxConcurrentTransfers: 3,
@@ -871,28 +930,29 @@ const loadSettings = async () => {
   try {
     const saved = await window.electronAPI.settings.get()
     if (saved) {
-      settings.value = { ...settings.value, ...saved }
+      // 深度合并设置，确保新增的默认值不会丢失
+      settings.value = {
+        general: { ...settings.value.general, ...saved.general },
+        terminal: { ...settings.value.terminal, ...saved.terminal },
+        ssh: { ...settings.value.ssh, ...saved.ssh },
+        sftp: { ...settings.value.sftp, ...saved.sftp },
+        security: { ...settings.value.security, ...saved.security },
+        updates: { ...settings.value.updates, ...saved.updates }
+      }
     }
   } catch (error) {
     console.error('Failed to load settings:', error)
   }
 }
 
-import { useAIStore } from '@/stores/ai'
-
-const aiStore = useAIStore()
-
 const saveSettings = async () => {
   try {
-    // 1. 保存常规设置
-    // 使用toRaw获取原始对象，避免Vue响应式代理导致的序列化问题
+    // 保存常规设置
     await window.electronAPI.settings.update(toRaw(settings.value))
     
-    // 2. 保存 AI 设置
-    // 注意：AI 设置由 AIStore 独立管理，我们在这里触发它的保存逻辑
-    // 只有在 AI 配置已加载的情况下才保存，避免覆盖
-    if (aiStore.config) {
-      await aiStore.updateConfig({ ...aiStore.config })
+    // 保存 AI 设置（如果有更改）
+    if (aiSettingsPanelRef.value) {
+      await aiSettingsPanelRef.value.saveConfig()
     }
     
     ElMessage.success('设置已保存')
@@ -1264,7 +1324,23 @@ const captureShortcut = (event: KeyboardEvent) => {
     return
   }
   
-  editingShortcutKey.value = event.key
+  // 使用 event.code 来获取物理按键，避免 Alt 键改变按键值的问题
+  const codeToKey: Record<string, string> = {
+    'KeyA': 'a', 'KeyB': 'b', 'KeyC': 'c', 'KeyD': 'd', 'KeyE': 'e',
+    'KeyF': 'f', 'KeyG': 'g', 'KeyH': 'h', 'KeyI': 'i', 'KeyJ': 'j',
+    'KeyK': 'k', 'KeyL': 'l', 'KeyM': 'm', 'KeyN': 'n', 'KeyO': 'o',
+    'KeyP': 'p', 'KeyQ': 'q', 'KeyR': 'r', 'KeyS': 's', 'KeyT': 't',
+    'KeyU': 'u', 'KeyV': 'v', 'KeyW': 'w', 'KeyX': 'x', 'KeyY': 'y',
+    'KeyZ': 'z',
+    'Digit1': '1', 'Digit2': '2', 'Digit3': '3', 'Digit4': '4', 'Digit5': '5',
+    'Digit6': '6', 'Digit7': '7', 'Digit8': '8', 'Digit9': '9', 'Digit0': '0',
+    'Comma': ',', 'Period': '.', 'Slash': '/', 'Semicolon': ';',
+    'Tab': 'Tab', 'Enter': 'Enter', 'Escape': 'Escape', 'Space': 'Space'
+  }
+  
+  // 优先使用 code 映射，如果没有映射则使用 key
+  const key = codeToKey[event.code] || event.key
+  editingShortcutKey.value = key
   
   const modifiers: string[] = []
   if (event.ctrlKey || event.metaKey) modifiers.push('ctrl')
@@ -1389,8 +1465,12 @@ const saveShortcutSettings = async () => {
 const loadLockConfig = async () => {
   try {
     const result = await window.electronAPI.sessionLock?.getConfig?.()
-    if (result?.success) {
-      lockConfig.value = { ...lockConfig.value, ...result.data }
+    if (result?.success && result.data) {
+      // 映射后端字段名到前端字段名
+      lockConfig.value.autoLockEnabled = result.data.enabled
+      lockConfig.value.autoLockTimeout = result.data.autoLockTimeout
+      lockConfig.value.lockOnMinimize = result.data.lockOnMinimize
+      lockConfig.value.lockOnSuspend = result.data.lockOnSuspend
     }
   } catch (error) {
     console.error('Failed to load lock config:', error)
@@ -1411,10 +1491,9 @@ const loadLockStatus = async () => {
 
 const saveLockConfig = async () => {
   try {
-    // 使用 toRaw 获取原始对象，避免克隆错误
+    // 映射前端字段名到后端字段名
     const configData = {
-      hasPassword: lockConfig.value.hasPassword,
-      autoLockEnabled: lockConfig.value.autoLockEnabled,
+      enabled: lockConfig.value.autoLockEnabled,  // 前端用 autoLockEnabled，后端用 enabled
       autoLockTimeout: lockConfig.value.autoLockTimeout,
       lockOnMinimize: lockConfig.value.lockOnMinimize,
       lockOnSuspend: lockConfig.value.lockOnSuspend

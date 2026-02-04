@@ -28,6 +28,7 @@ export interface ElectronAPI {
     }
     ssh: {
         executeCommand: (sessionId: string, command: string, timeout?: number) => Promise<{ success: boolean; data?: string; error?: string }>
+        getCurrentDirectory: (sessionId: string) => Promise<{ success: boolean; data?: string; error?: string }>
         cancelReconnect: (sessionId: string) => Promise<void>
         connect: (id: string, config: any) => Promise<{ success: boolean; error?: string }>
         disconnect: (id: string) => Promise<void>
@@ -222,6 +223,7 @@ export interface ElectronAPI {
 
         // AI 请求
         request: (action: string, content: string, language?: string) => Promise<{ success: boolean; data?: string; error?: string }>
+        requestWithModel: (action: string, content: string, modelId: string, language?: string) => Promise<{ success: boolean; data?: string; error?: string }>
         cancelRequest: (requestId: string) => Promise<{ success: boolean; error?: string }>
 
         // 配置管理
@@ -230,6 +232,7 @@ export interface ElectronAPI {
 
         // 事件监听
         onProgress: (callback: (requestId: string, progress: number) => void) => void
+        onStreamChunk: (callback: (requestId: string, chunk: string) => void) => () => void
         onComplete: (callback: (requestId: string, response: string) => void) => void
         onError: (callback: (requestId: string, error: string) => void) => void
         onCancelled: (callback: (requestId: string) => void) => void

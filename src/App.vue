@@ -52,6 +52,19 @@
               <div v-show="showSplitView && sshTerminals.length >= 2" class="split-toolbar">
                 <div class="toolbar-left">
                   <span class="terminal-count">{{ sshTerminals.length }} 个终端</span>
+                  <div class="divider-vertical"></div>
+                  <!-- 广播模式开关 -->
+                  <el-tooltip content="开启/关闭广播模式 (Ctrl+B) - 输入将同步到所有终端" placement="bottom">
+                    <el-button
+                      :type="broadcastMode ? 'warning' : ''"
+                      size="small"
+                      @click="toggleBroadcastMode"
+                    >
+                      <span v-if="broadcastMode">📡 广播中</span>
+                      <span v-else>📡 广播</span>
+                    </el-button>
+                  </el-tooltip>
+                  <span class="shortcut-hint">Alt+方向键切换面板</span>
                 </div>
                 <div class="toolbar-right">
                   <el-button-group>
@@ -96,32 +109,55 @@
               <div 
                 v-if="showSplitView && sshTerminals.length >= 2" 
                 class="split-terminals-container"
-                :style="gridStyle"
+                :class="{ 'broadcast-active': broadcastMode, 'has-maximized': maximizedPaneId !== null }"
+                :style="maximizedPaneId ? {} : gridStyle"
               >
                 <div
                   v-for="(tab, index) in sshTerminals"
                   :key="`split-${tab.id}`"
                   class="split-terminal-pane"
-                  :class="{ active: appStore.activeTab === tab.id }"
-                  @click="appStore.activeTab = tab.id"
+                  :class="{ 
+                    active: appStore.activeTab === tab.id,
+                    maximized: maximizedPaneId === tab.id,
+                    hidden: maximizedPaneId !== null && maximizedPaneId !== tab.id
+                  }"
+                  @click="handlePaneClick(tab.id)"
                 >
-                  <div class="pane-header">
-                    <span class="pane-title">{{ tab.name }}</span>
-                    <el-button 
-                      type="danger" 
-                      link 
-                      size="small"
-                      @click.stop="handleCloseTab(tab.id)"
-                    >
-                      ✖
-                    </el-button>
+                  <div class="pane-header" @dblclick="toggleMaximize(tab.id)">
+                    <div class="pane-info">
+                      <span class="pane-index">{{ index + 1 }}</span>
+                      <span class="pane-title">{{ tab.session?.username }}@{{ tab.session?.host }}</span>
+                      <span class="pane-name">({{ tab.name }})</span>
+                    </div>
+                    <div class="pane-actions">
+                      <el-tooltip :content="maximizedPaneId === tab.id ? '还原' : '最大化'" placement="top">
+                        <el-button 
+                          link 
+                          size="small"
+                          @click.stop="toggleMaximize(tab.id)"
+                        >
+                          {{ maximizedPaneId === tab.id ? '🗗' : '🗖' }}
+                        </el-button>
+                      </el-tooltip>
+                      <el-button 
+                        type="danger" 
+                        link 
+                        size="small"
+                        @click.stop="handleCloseTab(tab.id)"
+                      >
+                        ✖
+                      </el-button>
+                    </div>
                   </div>
                   <div class="pane-content">
                     <TerminalTab
+                      ref="terminalTabRefs"
                       :connection-id="tab.id"
                       :session="tab.session"
                       :terminal-options="appStore.terminalOptions"
                       :hide-close-button="true"
+                      :broadcast-mode="broadcastMode"
+                      @broadcast-input="handleBroadcastInput"
                     />
                   </div>
                 </div>
@@ -173,14 +209,14 @@
                       <div class="empty-icon-wrapper">
                          <el-icon :size="48"><Connection /></el-icon>
                       </div>
-                      <h3>Ready to Connect</h3>
-                      <p>Select a session from the list or create a new one to get started.</p>
+                      <h3>{{ t('home.readyToConnect') }}</h3>
+                      <p>{{ t('home.selectSessionHint') }}</p>
                       <div class="empty-actions">
                         <el-button type="primary" @click="appStore.showSessionForm = true" size="large">
-                          Create New Session
+                          {{ t('home.createNewSession') }}
                         </el-button>
                         <el-button @click="appStore.showQuickConnect = true" size="large">
-                          Quick Connect
+                          {{ t('home.quickConnect') }}
                         </el-button>
                       </div>
                     </div>
@@ -267,7 +303,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Connection, Plus, Lightning, Grid, ChatDotRound } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
@@ -275,6 +311,7 @@ import { useAIStore } from '@/stores/ai'
 import { v4 as uuidv4 } from 'uuid'
 import { keyboardShortcutManager } from '@/utils/keyboard-shortcuts'
 import { useLocale } from '@/composables/useLocale'
+import { terminalManager } from '@/utils/terminal-manager'
 
 // 组件导入
 import Sidebar from './components/Common/Sidebar.vue'
@@ -317,6 +354,12 @@ const searchInputRef = ref<HTMLElement | null>(null)
 // 分屏视图状态
 const showSplitView = ref(false)
 const layoutMode = ref<'auto' | 'horizontal' | 'vertical'>('auto')
+const broadcastMode = ref(false)
+const maximizedPaneId = ref<string | null>(null)
+const terminalTabRefs = ref<any[]>([])
+
+// 当前焦点的分屏索引（用于快捷键切换）
+const focusedPaneIndex = ref(0)
 
 // 计算 Grid 样式
 const gridStyle = computed(() => {
@@ -368,15 +411,123 @@ const toggleSplitView = () => {
     return
   }
   showSplitView.value = !showSplitView.value
+  
+  // 退出分屏时重置状态
+  if (!showSplitView.value) {
+    broadcastMode.value = false
+    maximizedPaneId.value = null
+  }
+}
+
+// 切换广播模式
+const toggleBroadcastMode = () => {
+  broadcastMode.value = !broadcastMode.value
+  if (broadcastMode.value) {
+    ElMessage.success('广播模式已开启，输入将同步到所有终端')
+  } else {
+    ElMessage.info('广播模式已关闭')
+  }
+}
+
+// 处理广播输入 - 通过 TerminalTab 的 @broadcast-input 事件触发
+const handleBroadcastInput = (data: string, sourceId: string) => {
+  if (!broadcastMode.value || !showSplitView.value) return
+  
+  // 向所有其他终端发送相同的输入
+  sshTerminals.value.forEach(terminal => {
+    if (terminal.id !== sourceId) {
+      window.electronAPI.ssh.write(terminal.id, data)
+    }
+  })
+}
+
+// 切换面板最大化
+const toggleMaximize = (paneId: string) => {
+  if (maximizedPaneId.value === paneId) {
+    maximizedPaneId.value = null
+  } else {
+    maximizedPaneId.value = paneId
+  }
+}
+
+// 处理面板点击
+const handlePaneClick = (tabId: string) => {
+  appStore.activeTab = tabId
+  // 更新焦点索引
+  const index = sshTerminals.value.findIndex(t => t.id === tabId)
+  if (index !== -1) {
+    focusedPaneIndex.value = index
+  }
+}
+
+// 快捷键切换焦点到下一个面板
+const focusNextPane = () => {
+  if (!showSplitView.value || sshTerminals.value.length < 2) return
+  
+  focusedPaneIndex.value = (focusedPaneIndex.value + 1) % sshTerminals.value.length
+  const nextTab = sshTerminals.value[focusedPaneIndex.value]
+  if (nextTab) {
+    appStore.activeTab = nextTab.id
+  }
+}
+
+// 快捷键切换焦点到上一个面板
+const focusPrevPane = () => {
+  if (!showSplitView.value || sshTerminals.value.length < 2) return
+  
+  focusedPaneIndex.value = (focusedPaneIndex.value - 1 + sshTerminals.value.length) % sshTerminals.value.length
+  const prevTab = sshTerminals.value[focusedPaneIndex.value]
+  if (prevTab) {
+    appStore.activeTab = prevTab.id
+  }
+}
+
+// 快捷键切换焦点（按方向）
+const focusPaneByDirection = (direction: 'up' | 'down' | 'left' | 'right') => {
+  if (!showSplitView.value || sshTerminals.value.length < 2) return
+  
+  const count = sshTerminals.value.length
+  const cols = layoutMode.value === 'vertical' ? 1 : 
+               layoutMode.value === 'horizontal' ? count :
+               Math.ceil(Math.sqrt(count))
+  
+  const currentIndex = focusedPaneIndex.value
+  let newIndex = currentIndex
+  
+  switch (direction) {
+    case 'left':
+      if (currentIndex % cols > 0) newIndex = currentIndex - 1
+      break
+    case 'right':
+      if (currentIndex % cols < cols - 1 && currentIndex + 1 < count) newIndex = currentIndex + 1
+      break
+    case 'up':
+      if (currentIndex >= cols) newIndex = currentIndex - cols
+      break
+    case 'down':
+      if (currentIndex + cols < count) newIndex = currentIndex + cols
+      break
+  }
+  
+  if (newIndex !== currentIndex && newIndex >= 0 && newIndex < count) {
+    focusedPaneIndex.value = newIndex
+    appStore.activeTab = sshTerminals.value[newIndex].id
+  }
 }
 
 // 在分屏模式下关闭标签
 const handleCloseTab = (tabId: string) => {
   appStore.removeTab(tabId)
   
+  // 如果关闭的是最大化的面板，取消最大化
+  if (maximizedPaneId.value === tabId) {
+    maximizedPaneId.value = null
+  }
+  
   // 如果关闭后标签数量少于2个，退出分屏模式
   if (sshTerminals.value.length < 2) {
     showSplitView.value = false
+    broadcastMode.value = false
   }
 }
 
@@ -404,6 +555,9 @@ onMounted(async () => {
   // 注册快捷键
   setupKeyboardShortcuts()
   
+  // 监听主进程发送的快捷键事件
+  setupMainProcessShortcuts()
+  
   // 监听锁定事件（从后端触发）
   window.electronAPI.sessionLock?.onLocked?.(() => {
     isLocked.value = true
@@ -428,6 +582,90 @@ onMounted(async () => {
     console.error('Failed to check lock status:', error)
   }
 })
+
+/**
+ * 监听主进程发送的快捷键事件
+ * 主进程通过 before-input-event 拦截键盘事件并发送 IPC 消息
+ */
+function setupMainProcessShortcuts() {
+  console.log('[App] Setting up main process shortcuts...')
+  
+  // Ctrl+N: 新建会话
+  window.electronAPI.onShortcut('new-connection', () => {
+    console.log('[Shortcut IPC] New connection triggered')
+    appStore.showSessionForm = true
+  })
+  
+  // Ctrl+T: 快速连接
+  window.electronAPI.onShortcut('quick-connect', () => {
+    console.log('[Shortcut IPC] Quick connect triggered')
+    appStore.showQuickConnect = true
+  })
+  
+  // Ctrl+F: 搜索
+  window.electronAPI.onShortcut('search', () => {
+    console.log('[Shortcut IPC] Search triggered')
+    appStore.activeView = 'sessions'
+    setTimeout(() => {
+      const searchInput = document.querySelector('.session-list .el-input__inner') as HTMLInputElement
+      if (searchInput) {
+        searchInput.focus()
+      }
+    }, 100)
+  })
+  
+  // Ctrl+W: 关闭当前标签
+  window.electronAPI.onShortcut('close-tab', () => {
+    console.log('[Shortcut IPC] Close tab triggered')
+    if (appStore.activeTab) {
+      appStore.removeTab(appStore.activeTab)
+    }
+  })
+  
+  // Ctrl+,: 打开设置
+  window.electronAPI.onShortcut('settings', () => {
+    console.log('[Shortcut IPC] Settings triggered')
+    appStore.activeView = 'settings'
+  })
+  
+  // Ctrl+Tab: 下一个标签
+  window.electronAPI.onShortcut('next-tab', () => {
+    console.log('[Shortcut IPC] Next tab triggered')
+    appStore.nextTab()
+  })
+  
+  // Ctrl+Shift+Tab: 上一个标签
+  window.electronAPI.onShortcut('prev-tab', () => {
+    console.log('[Shortcut IPC] Previous tab triggered')
+    appStore.prevTab()
+  })
+  
+  // Ctrl+Alt+L: 锁定会话
+  window.electronAPI.onShortcut('lock-session', async () => {
+    console.log('[Shortcut IPC] Lock session triggered')
+    try {
+      const result = await window.electronAPI.sessionLock?.lock?.()
+      if (result?.success) {
+        isLocked.value = true
+      } else if (result?.error) {
+        ElMessage.warning(result.error)
+      }
+    } catch (error) {
+      console.error('Failed to lock session:', error)
+    }
+  })
+  
+  // Ctrl+1~9: 切换到指定标签
+  window.electronAPI.onShortcut('switch-tab', (tabNum: string) => {
+    console.log('[Shortcut IPC] Switch tab triggered:', tabNum)
+    const index = parseInt(tabNum) - 1
+    if (appStore.tabs.length > index) {
+      appStore.activeTab = appStore.tabs[index].id
+    }
+  })
+  
+  console.log('[App] Main process shortcuts registered')
+}
 
 /**
  * 设置键盘快捷键
@@ -534,6 +772,8 @@ function setupKeyboardShortcuts() {
         const result = await window.electronAPI.sessionLock?.lock?.()
         if (result?.success) {
           isLocked.value = true
+        } else if (result?.error) {
+          ElMessage.warning(result.error)
         }
       } catch (error) {
         console.error('Failed to lock session:', error)
@@ -555,6 +795,99 @@ function setupKeyboardShortcuts() {
       }
     })
   }
+  
+  // Ctrl+G: 切换分屏视图
+  keyboardShortcutManager.register('toggle-split-view', {
+    key: 'g',
+    ctrl: true,
+    description: '切换分屏视图',
+    action: () => {
+      console.log('[Shortcut] Toggle split view triggered')
+      toggleSplitView()
+    }
+  })
+  
+  // Ctrl+B: 切换广播模式
+  keyboardShortcutManager.register('toggle-broadcast', {
+    key: 'b',
+    ctrl: true,
+    description: '切换广播模式',
+    action: () => {
+      console.log('[Shortcut] Toggle broadcast mode triggered')
+      if (showSplitView.value) {
+        toggleBroadcastMode()
+      }
+    }
+  })
+  
+  // Alt+方向键: 在分屏面板间切换焦点
+  keyboardShortcutManager.register('focus-pane-left', {
+    key: 'ArrowLeft',
+    alt: true,
+    description: '切换到左侧面板',
+    action: () => {
+      if (showSplitView.value) {
+        focusPaneByDirection('left')
+      }
+    }
+  })
+  
+  keyboardShortcutManager.register('focus-pane-right', {
+    key: 'ArrowRight',
+    alt: true,
+    description: '切换到右侧面板',
+    action: () => {
+      if (showSplitView.value) {
+        focusPaneByDirection('right')
+      }
+    }
+  })
+  
+  keyboardShortcutManager.register('focus-pane-up', {
+    key: 'ArrowUp',
+    alt: true,
+    description: '切换到上方面板',
+    action: () => {
+      if (showSplitView.value) {
+        focusPaneByDirection('up')
+      }
+    }
+  })
+  
+  keyboardShortcutManager.register('focus-pane-down', {
+    key: 'ArrowDown',
+    alt: true,
+    description: '切换到下方面板',
+    action: () => {
+      if (showSplitView.value) {
+        focusPaneByDirection('down')
+      }
+    }
+  })
+  
+  // Alt+]: 下一个分屏面板
+  keyboardShortcutManager.register('focus-next-pane', {
+    key: ']',
+    alt: true,
+    description: '下一个分屏面板',
+    action: () => {
+      if (showSplitView.value) {
+        focusNextPane()
+      }
+    }
+  })
+  
+  // Alt+[: 上一个分屏面板
+  keyboardShortcutManager.register('focus-prev-pane', {
+    key: '[',
+    alt: true,
+    description: '上一个分屏面板',
+    action: () => {
+      if (showSplitView.value) {
+        focusPrevPane()
+      }
+    }
+  })
   
   console.log('[App] Keyboard shortcuts registered:', keyboardShortcutManager.getAll().size)
 }
@@ -1037,6 +1370,14 @@ body,
   font-weight: 500;
 }
 
+.split-toolbar .shortcut-hint {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
 .split-toolbar .toolbar-right {
   display: flex;
   gap: 8px;
@@ -1050,6 +1391,28 @@ body,
   overflow: hidden;
 }
 
+/* 广播模式激活时的视觉提示 */
+.split-terminals-container.broadcast-active {
+  background: var(--warning-color);
+}
+
+.split-terminals-container.broadcast-active .split-terminal-pane {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+/* 最大化面板 */
+.split-terminals-container.has-maximized {
+  display: block;
+}
+
+.split-terminal-pane.maximized {
+  width: 100%;
+  height: 100%;
+}
+
+.split-terminal-pane.hidden {
+  display: none;
+}
 
 .divider-vertical {
   width: 1px;
@@ -1076,19 +1439,63 @@ body,
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 12px;
+  padding: 4px 8px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  cursor: default;
+  user-select: none;
+}
+
+.split-terminal-pane .pane-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  flex: 1;
+}
+
+.split-terminal-pane .pane-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: var(--primary-color);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
   flex-shrink: 0;
 }
 
 .split-terminal-pane .pane-title {
-  font-size: 12px;
-  color: var(--text-secondary);
+  font-size: 11px;
+  color: var(--text-primary);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.split-terminal-pane .pane-name {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.split-terminal-pane .pane-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.split-terminal-pane .pane-actions .el-button {
+  padding: 2px 4px;
+  font-size: 12px;
 }
 
 .split-terminal-pane .pane-content {

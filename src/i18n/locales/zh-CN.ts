@@ -39,6 +39,13 @@ export default {
     currentLocale: '当前语言'
   },
   
+  home: {
+    readyToConnect: '准备连接',
+    selectSessionHint: '从左侧列表选择一个会话，或创建新会话开始使用。',
+    createNewSession: '新建会话',
+    quickConnect: '快速连接'
+  },
+  
   session: {
     title: '会话管理',
     newSession: '新建会话',

@@ -1,126 +1,116 @@
 <template>
   <div class="proxy-jump-config">
     <div class="config-header">
-      <label class="checkbox-label">
-        <input
-          type="checkbox"
-          v-model="localConfig.enabled"
-          @change="emitUpdate"
-        />
-        <span>启用跳板机（ProxyJump）</span>
-      </label>
-      <button
+      <el-checkbox v-model="localConfig.enabled" @change="emitUpdate">
+        <el-icon><Connection /></el-icon>
+        <span>启用跳板机 (ProxyJump)</span>
+      </el-checkbox>
+      <el-button
         v-if="localConfig.enabled && !isNested"
-        @click="addNextJump"
-        class="btn-add"
-        title="添加下一级跳板"
+        type="primary"
+        size="small"
+        :icon="Plus"
+        @click.prevent="addNextJump"
       >
-        ➕ 添加下一级
-      </button>
+        添加下一级
+      </el-button>
     </div>
 
-    <div v-if="localConfig.enabled" class="config-content">
-      <div class="config-level">
-        <div v-if="level > 0" class="level-indicator">
-          <span class="level-badge">第 {{ level + 1 }} 级跳板</span>
-          <button @click="removeThisLevel" class="btn-remove" title="删除此级">
-            🗑️
-          </button>
-        </div>
+    <div v-if="localConfig.enabled" class="config-body">
+      <div v-if="level > 0" class="level-indicator">
+        <el-tag type="primary" size="small">第 {{ level + 1 }} 级跳板</el-tag>
+        <el-button 
+          type="danger" 
+          size="small" 
+          :icon="Delete" 
+          circle 
+          @click.prevent="removeThisLevel"
+        />
+      </div>
 
-        <div class="form-grid">
-          <div class="form-group">
-            <label>主机地址 *</label>
-            <input
-              v-model="localConfig.host"
-              type="text"
-              placeholder="跳板机IP或域名"
-              @input="emitUpdate"
-            />
-          </div>
-
-          <div class="form-group">
-            <label>端口 *</label>
-            <input
-              v-model.number="localConfig.port"
-              type="number"
-              placeholder="22"
-              @input="emitUpdate"
-            />
-          </div>
-
-          <div class="form-group">
-            <label>用户名 *</label>
-            <input
-              v-model="localConfig.username"
-              type="text"
-              placeholder="用户名"
-              @input="emitUpdate"
-            />
-          </div>
-
-          <div class="form-group">
-            <label>认证方式 *</label>
-            <select v-model="localConfig.authType" @change="emitUpdate">
-              <option value="password">密码</option>
-              <option value="privateKey">私钥</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- 密码认证 -->
-        <div v-if="localConfig.authType === 'password'" class="form-group">
-          <label>密码 *</label>
-          <input
-            v-model="localConfig.password"
-            type="password"
-            placeholder="跳板机密码"
+      <div class="host-port-row">
+        <el-form-item label="主机" label-width="100px" style="flex: 1">
+          <el-input
+            v-model="localConfig.host"
+            placeholder="跳板机IP或域名"
             @input="emitUpdate"
           />
-        </div>
-
-        <!-- 私钥认证 -->
-        <div v-if="localConfig.authType === 'privateKey'" class="form-group">
-          <label>私钥路径 *</label>
-          <div class="input-with-button">
-            <input
-              v-model="localConfig.privateKeyPath"
-              type="text"
-              placeholder="私钥文件路径"
-              @input="emitUpdate"
-            />
-            <button @click="selectPrivateKey" class="btn-browse">
-              浏览
-            </button>
-          </div>
-        </div>
-
-        <div v-if="localConfig.authType === 'privateKey'" class="form-group">
-          <label>私钥密码（可选）</label>
-          <input
-            v-model="localConfig.passphrase"
-            type="password"
-            placeholder="如果私钥有密码保护"
-            @input="emitUpdate"
+        </el-form-item>
+        <el-form-item label="端口" label-width="60px" style="width: 140px">
+          <el-input-number
+            v-model="localConfig.port"
+            :min="1"
+            :max="65535"
+            style="width: 100%"
+            @change="emitUpdate"
           />
-        </div>
+        </el-form-item>
+      </div>
 
-        <!-- 连接预览 -->
-        <div class="connection-preview">
-          <div class="preview-label">连接路径：</div>
-          <div class="preview-chain">
-            <span class="chain-item">本机</span>
-            <span class="chain-arrow">→</span>
-            <span class="chain-item highlight">
-              {{ localConfig.username }}@{{ localConfig.host }}:{{ localConfig.port }}
-            </span>
-            <template v-if="localConfig.nextJump">
-              <span class="chain-arrow">→</span>
-              <span class="chain-item">...</span>
-            </template>
-            <span class="chain-arrow">→</span>
-            <span class="chain-item">目标服务器</span>
-          </div>
+      <el-form-item label="用户名" label-width="100px">
+        <el-input
+          v-model="localConfig.username"
+          placeholder="用户名"
+          @input="emitUpdate"
+        />
+      </el-form-item>
+
+      <el-form-item label="认证方式" label-width="100px">
+        <el-radio-group v-model="localConfig.authType" @change="emitUpdate">
+          <el-radio value="password">密码</el-radio>
+          <el-radio value="privateKey">私钥</el-radio>
+        </el-radio-group>
+      </el-form-item>
+
+      <!-- 密码认证 -->
+      <el-form-item v-if="localConfig.authType === 'password'" label="密码" label-width="100px">
+        <el-input
+          v-model="localConfig.password"
+          type="password"
+          placeholder="跳板机密码"
+          show-password
+          @input="emitUpdate"
+        />
+      </el-form-item>
+
+      <!-- 私钥认证 -->
+      <el-form-item v-if="localConfig.authType === 'privateKey'" label="私钥路径" label-width="100px">
+        <el-input
+          v-model="localConfig.privateKeyPath"
+          placeholder="私钥文件路径"
+          @input="emitUpdate"
+        >
+          <template #append>
+            <el-button @click.prevent="selectPrivateKey">浏览</el-button>
+          </template>
+        </el-input>
+      </el-form-item>
+
+      <el-form-item v-if="localConfig.authType === 'privateKey'" label="私钥密码" label-width="100px">
+        <el-input
+          v-model="localConfig.passphrase"
+          type="password"
+          placeholder="如果私钥有密码保护（可选）"
+          show-password
+          @input="emitUpdate"
+        />
+      </el-form-item>
+
+      <!-- 连接预览 -->
+      <div class="connection-preview">
+        <div class="preview-label">连接路径：</div>
+        <div class="preview-chain">
+          <el-tag type="info" size="small">本机</el-tag>
+          <el-icon><Right /></el-icon>
+          <el-tag type="primary" size="small">
+            {{ localConfig.username || 'user' }}@{{ localConfig.host || 'host' }}:{{ localConfig.port }}
+          </el-tag>
+          <template v-if="localConfig.nextJump">
+            <el-icon><Right /></el-icon>
+            <el-tag type="warning" size="small">...</el-tag>
+          </template>
+          <el-icon><Right /></el-icon>
+          <el-tag type="success" size="small">目标服务器</el-tag>
         </div>
       </div>
 
@@ -140,6 +130,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { Connection, Plus, Delete, Right } from '@element-plus/icons-vue'
 import type { ProxyJumpConfig as ProxyJumpConfigType } from '@/types/session'
 
 interface Props {
@@ -237,154 +228,51 @@ const selectPrivateKey = async () => {
 <style scoped>
 .proxy-jump-config {
   border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 16px;
-  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+  background-color: var(--bg-secondary);
 }
 
 .config-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
 }
 
-.checkbox-label {
+.config-header :deep(.el-checkbox__label) {
   display: flex;
   align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-weight: 500;
+  gap: 6px;
 }
 
-.checkbox-label input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-}
-
-.btn-add {
-  padding: 6px 12px;
-  background: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s;
-}
-
-.btn-add:hover {
-  background: var(--primary-hover);
-}
-
-.config-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.config-level {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.config-body {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border-color);
 }
 
 .level-indicator {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 12px;
   padding: 8px 12px;
   background: var(--bg-tertiary);
   border-radius: 4px;
 }
 
-.level-badge {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--primary-color);
-}
-
-.btn-remove {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 4px 8px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.btn-remove:hover {
-  background: var(--error-color);
-  border-color: var(--error-color);
-  color: white;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+.host-port-row {
+  display: flex;
   gap: 12px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-group label {
-  font-size: 13px;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.form-group input,
-.form-group select {
-  padding: 8px 12px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 14px;
-}
-
-.form-group input:focus,
-.form-group select:focus {
-  outline: none;
-  border-color: var(--primary-color);
-}
-
-.input-with-button {
-  display: flex;
-  gap: 8px;
-}
-
-.input-with-button input {
-  flex: 1;
-}
-
-.btn-browse {
-  padding: 8px 16px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
-  white-space: nowrap;
-}
-
-.btn-browse:hover {
-  background: var(--bg-hover);
-  border-color: var(--primary-color);
 }
 
 .connection-preview {
   padding: 12px;
   background: var(--bg-tertiary);
-  border-radius: 4px;
+  border-radius: 6px;
   border: 1px dashed var(--border-color);
+  margin-top: 12px;
 }
 
 .preview-label {
@@ -398,30 +286,16 @@ const selectPrivateKey = async () => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: 13px;
 }
 
-.chain-item {
-  padding: 4px 8px;
-  background: var(--bg-primary);
-  border-radius: 4px;
-  color: var(--text-primary);
-}
-
-.chain-item.highlight {
-  background: var(--primary-color);
-  color: white;
-  font-weight: 500;
-}
-
-.chain-arrow {
+.preview-chain .el-icon {
   color: var(--text-tertiary);
-  font-weight: bold;
 }
 
 .next-jump {
-  margin-left: 24px;
+  margin-top: 16px;
+  margin-left: 16px;
   padding-left: 16px;
-  border-left: 2px solid var(--border-color);
+  border-left: 2px solid var(--primary-color);
 }
 </style>

@@ -115,6 +115,16 @@ export function registerAIHandlers(ipc: IpcMain, aiManager: AIManager) {
     }
   })
 
+  // 支持指定模型的请求
+  ipc.handle('ai:requestWithModel', async (_event, action: string, content: string, modelId: string, language?: string) => {
+    try {
+      const response = await aiManager.requestWithModel(action as any, content, modelId, language)
+      return { success: true, data: response }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
   ipc.handle('ai:cancelRequest', async (_event, requestId: string) => {
     try {
       await aiManager.cancelRequest(requestId)
@@ -143,6 +153,7 @@ export function registerAIHandlers(ipc: IpcMain, aiManager: AIManager) {
       return { success: false, error: error.message }
     }
   })
+
 
   // ==================== 聊天历史管理 ====================
 

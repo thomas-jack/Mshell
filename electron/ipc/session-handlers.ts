@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { sessionManager } from '../managers/SessionManager'
+import { auditLogManager, AuditAction } from '../managers/AuditLogManager'
 
 // Session IPC handlers
 export function registerSessionHandlers() {
@@ -23,20 +24,53 @@ export function registerSessionHandlers() {
 
   ipcMain.handle('session:create', async (_event, config: any) => {
     await sessionManager.initialize()
-    return sessionManager.createSession(config)
+    const session = sessionManager.createSession(config)
+    
+    // 记录审计日志
+    auditLogManager.log(AuditAction.SESSION_CREATE, {
+      sessionId: session.id,
+      resource: config.name || config.host,
+      details: { name: config.name, host: config.host, port: config.port, username: config.username },
+      success: true
+    })
+    
+    return session
   })
 
   ipcMain.handle('session:update', async (_event, id: string, updates: any) => {
     await sessionManager.initialize()
     sessionManager.updateSession(id, updates)
+    
+    // 记录审计日志
+    auditLogManager.log(AuditAction.SESSION_UPDATE, {
+      sessionId: id,
+      resource: updates.name || id,
+      details: { updates },
+      success: true
+    })
   })
 
   ipcMain.handle('session:delete', async (_event, id: string) => {
     try {
       await sessionManager.initialize()
+      const session = sessionManager.getSession(id)
       sessionManager.deleteSession(id)
+      
+      // 记录审计日志
+      auditLogManager.log(AuditAction.SESSION_DELETE, {
+        sessionId: id,
+        resource: session?.name || id,
+        details: { sessionName: session?.name, host: session?.host },
+        success: true
+      })
+      
       return { success: true }
     } catch (error: any) {
+      auditLogManager.log(AuditAction.SESSION_DELETE, {
+        sessionId: id,
+        success: false,
+        errorMessage: error.message
+      })
       return { success: false, error: error.message }
     }
   })

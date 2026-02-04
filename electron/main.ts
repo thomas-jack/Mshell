@@ -136,36 +136,58 @@ function createWindow() {
     // Check for Ctrl/Cmd modifier
     const control = process.platform === 'darwin' ? input.meta : input.control
 
-    if (control && input.type === 'keyDown') {
-      switch (input.key.toLowerCase()) {
-        case 'n':
-          mainWindow?.webContents.send('shortcut:new-connection')
-          event.preventDefault()
-          break
-        case 'k':
-          mainWindow?.webContents.send('shortcut:quick-connect')
-          event.preventDefault()
-          break
-        case 'f':
-          mainWindow?.webContents.send('shortcut:search')
-          event.preventDefault()
-          break
-        case 'w':
-          mainWindow?.webContents.send('shortcut:close-tab')
-          event.preventDefault()
-          break
-        case ',':
-          mainWindow?.webContents.send('shortcut:settings')
-          event.preventDefault()
-          break
-        case 'tab':
-          if (input.shift) {
-            mainWindow?.webContents.send('shortcut:prev-tab')
-          } else {
-            mainWindow?.webContents.send('shortcut:next-tab')
-          }
-          event.preventDefault()
-          break
+    if (input.type === 'keyDown') {
+      // Ctrl+Alt+L: 锁定会话 (需要单独处理，因为 Alt 可能改变按键值)
+      if (control && input.alt && (input.key.toLowerCase() === 'l' || input.code === 'KeyL')) {
+        mainWindow?.webContents.send('shortcut:lock-session')
+        event.preventDefault()
+        return
+      }
+      
+      // 其他 Ctrl 快捷键
+      if (control && !input.alt) {
+        switch (input.key.toLowerCase()) {
+          case 'n':
+            mainWindow?.webContents.send('shortcut:new-connection')
+            event.preventDefault()
+            break
+          case 't':
+            mainWindow?.webContents.send('shortcut:quick-connect')
+            event.preventDefault()
+            break
+          case 'f':
+            mainWindow?.webContents.send('shortcut:search')
+            event.preventDefault()
+            break
+          case 'w':
+            mainWindow?.webContents.send('shortcut:close-tab')
+            event.preventDefault()
+            break
+          case ',':
+            mainWindow?.webContents.send('shortcut:settings')
+            event.preventDefault()
+            break
+          case 'tab':
+            if (input.shift) {
+              mainWindow?.webContents.send('shortcut:prev-tab')
+            } else {
+              mainWindow?.webContents.send('shortcut:next-tab')
+            }
+            event.preventDefault()
+            break
+          case '1':
+          case '2':
+          case '3':
+          case '4':
+          case '5':
+          case '6':
+          case '7':
+          case '8':
+          case '9':
+            mainWindow?.webContents.send('shortcut:switch-tab', input.key)
+            event.preventDefault()
+            break
+        }
       }
     }
   })
@@ -193,32 +215,30 @@ function createWindow() {
     // 如果启用了最小化到托盘且不是真正退出
     if (settings.general.minimizeToTray && !isQuitting) {
       event.preventDefault()
-      mainWindow?.hide()
       
-      // 创建托盘图标（如果还没有）
-      if (!tray) {
-        createTray()
+      // 检查是否需要锁定（关闭到托盘时锁定）
+      // 注意：lockOnMinimize 实际上是"关闭到托盘时锁定"的意思
+      try {
+        const lockConfig = sessionLockManager.getConfig()
+        if (lockConfig.lockOnMinimize && sessionLockManager.hasPassword()) {
+          sessionLockManager.lock()
+          console.log('[Main] Session locked on close to tray')
+        }
+      } catch (error) {
+        console.error('[Main] Error locking on close to tray:', error)
       }
       
+      mainWindow?.hide()
       return false
     }
   })
 
   // 处理窗口最小化事件
+  // 注意：普通最小化（点击最小化按钮）不应该触发锁定
+  // 锁定只在"关闭到托盘"时触发
   mainWindow.on('minimize', () => {
-    try {
-      // 获取锁定配置
-      const lockConfig = sessionLockManager.getConfig()
-      
-      // 如果启用了"最小化时锁定"且已设置密码
-      if (lockConfig.enabled && lockConfig.lockOnMinimize && sessionLockManager.hasPassword()) {
-        // 锁定会话
-        sessionLockManager.lock()
-        console.log('[Main] Session locked on minimize')
-      }
-    } catch (error) {
-      console.error('[Main] Error locking on minimize:', error)
-    }
+    // 普通最小化不锁定，只是最小化到任务栏
+    console.log('[Main] Window minimized to taskbar')
   })
 }
 
@@ -243,6 +263,9 @@ app.whenReady().then(async () => {
   })
 
   createWindow()
+
+  // 创建托盘图标（应用启动时就创建）
+  createTray()
 
   // 设置 AI Manager 的主窗口引用
   if (mainWindow) {

@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     write: (id: string, data: string) => ipcRenderer.send('ssh:write', id, data),
     executeCommand: (id: string, command: string, timeout?: number) =>
       ipcRenderer.invoke('ssh:executeCommand', id, command, timeout),
+    getCurrentDirectory: (id: string) =>
+      ipcRenderer.invoke('ssh:getCurrentDirectory', id),
     resize: (id: string, cols: number, rows: number) =>
       ipcRenderer.send('ssh:resize', id, cols, rows),
     getConnection: (id: string) => ipcRenderer.invoke('ssh:getConnection', id),
@@ -153,8 +155,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Shortcut events
-  onShortcut: (event: string, callback: () => void) => {
-    ipcRenderer.on(`shortcut:${event}`, callback)
+  onShortcut: (event: string, callback: (...args: any[]) => void) => {
+    ipcRenderer.on(`shortcut:${event}`, (_event, ...args) => callback(...args))
   },
 
   // Dialog operations
@@ -384,10 +386,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateActivity: () => ipcRenderer.invoke('sessionLock:updateActivity'),
     getStatus: () => ipcRenderer.invoke('sessionLock:getStatus'),
     onLocked: (callback: () => void) => {
-      ipcRenderer.on('session:locked', callback)
+      ipcRenderer.on('session:locked', (_event) => callback())
     },
     onUnlocked: (callback: () => void) => {
-      ipcRenderer.on('session:unlocked', callback)
+      ipcRenderer.on('session:unlocked', (_event) => callback())
     }
   },
 
@@ -463,6 +465,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // AI 请求
     request: (action: string, content: string, language?: string) =>
       ipcRenderer.invoke('ai:request', action, content, language),
+    requestWithModel: (action: string, content: string, modelId: string, language?: string) =>
+      ipcRenderer.invoke('ai:requestWithModel', action, content, modelId, language),
     cancelRequest: (requestId: string) => ipcRenderer.invoke('ai:cancelRequest', requestId),
 
     // 配置管理
@@ -472,6 +476,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 事件监听
     onProgress: (callback: (requestId: string, progress: number) => void) => {
       ipcRenderer.on('ai:progress', (_event, requestId, progress) => callback(requestId, progress))
+    },
+    onStreamChunk: (callback: (requestId: string, chunk: string) => void) => {
+      const listener = (_event: any, requestId: string, chunk: string) => callback(requestId, chunk)
+      ipcRenderer.on('ai:stream-chunk', listener)
+      return () => {
+        ipcRenderer.removeListener('ai:stream-chunk', listener)
+      }
     },
     onComplete: (callback: (requestId: string, response: string) => void) => {
       ipcRenderer.on('ai:complete', (_event, requestId, response) => callback(requestId, response))

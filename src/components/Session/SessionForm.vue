@@ -188,12 +188,18 @@
 
       <!-- 跳板机配置 -->
       <el-divider content-position="left">
-        <span style="font-size: 14px; color: var(--text-secondary)">跳板机配置（可选）</span>
+        <span style="font-size: 14px; color: var(--text-secondary)">高级连接选项（可选）</span>
       </el-divider>
 
       <ProxyJumpConfig
         :config="form.proxyJump"
         @update="handleProxyJumpUpdate"
+      />
+
+      <!-- 代理配置 -->
+      <ProxyConfig
+        :config="form.proxy"
+        @update="handleProxyUpdate"
       />
     </el-form>
 
@@ -208,8 +214,9 @@
 import { ref, reactive, watch } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAppStore } from '@/stores/app'
-import type { SessionConfig, ProxyJumpConfig as ProxyJumpConfigType } from '@/types/session'
+import type { SessionConfig, ProxyJumpConfig as ProxyJumpConfigType, ProxyConfig as ProxyConfigType } from '@/types/session'
 import ProxyJumpConfig from './ProxyJumpConfig.vue'
+import ProxyConfig from './ProxyConfig.vue'
 
 interface Props {
   modelValue: boolean
@@ -314,7 +321,9 @@ const defaultForm = {
   billingCurrency: 'CNY',
   notes: '',
   // 跳板机配置
-  proxyJump: undefined as ProxyJumpConfigType | undefined
+  proxyJump: undefined as ProxyJumpConfigType | undefined,
+  // 代理配置
+  proxy: undefined as ProxyConfigType | undefined
 }
 
 const form = reactive({ ...defaultForm })
@@ -413,6 +422,8 @@ watch(
         form.notes = props.session.notes || ''
         // 跳板机配置
         form.proxyJump = props.session.proxyJump
+        // 代理配置
+        form.proxy = props.session.proxy
       } else {
         isEdit.value = false
         Object.assign(form, defaultForm)
@@ -458,6 +469,11 @@ const handleProxyJumpUpdate = (config: ProxyJumpConfigType) => {
   form.proxyJump = config.enabled ? config : undefined
 }
 
+// 处理代理配置更新
+const handleProxyUpdate = (config: ProxyConfigType) => {
+  form.proxy = config.enabled ? config : undefined
+}
+
 const handleSave = async () => {
   if (!formRef.value) return
 
@@ -480,7 +496,9 @@ const handleSave = async () => {
         billingCurrency: form.billingCurrency || 'CNY',
         notes: form.notes || undefined,
         // 跳板机配置
-        proxyJump: form.proxyJump
+        proxyJump: form.proxyJump,
+        // 代理配置
+        proxy: form.proxy
       }
 
       if (form.authType === 'password') {

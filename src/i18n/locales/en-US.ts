@@ -39,6 +39,13 @@ export default {
     currentLocale: 'Current Locale'
   },
   
+  home: {
+    readyToConnect: 'Ready to Connect',
+    selectSessionHint: 'Select a session from the list or create a new one to get started.',
+    createNewSession: 'Create New Session',
+    quickConnect: 'Quick Connect'
+  },
+  
   session: {
     title: 'Session Management',
     newSession: 'New Session',

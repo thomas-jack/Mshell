@@ -1,6 +1,7 @@
 import { Client } from 'ssh2'
 import * as net from 'net'
-import { ProxyJumpConfig } from '../../src/types/session'
+import { ProxyJumpConfig, ProxyConfig } from '../../src/types/session'
+import { ProxyHelper } from './proxy'
 
 /**
  * 跳板机连接辅助类
@@ -12,20 +13,29 @@ export class ProxyJumpHelper {
   static async connectThroughProxy(
     proxyConfig: ProxyJumpConfig,
     targetHost: string,
-    targetPort: number
+    targetPort: number,
+    underlyingProxy?: ProxyConfig
   ): Promise<net.Socket> {
     // 如果有多级跳板，递归建立连接
     if (proxyConfig.nextJump) {
       const intermediateSocket = await this.connectThroughProxy(
         proxyConfig.nextJump,
         proxyConfig.host,
-        proxyConfig.port
+        proxyConfig.port,
+        underlyingProxy // 传递底层代理配置
       )
       return await this.createProxyConnection(proxyConfig, targetHost, targetPort, intermediateSocket)
     }
 
-    // 直接连接到第一级跳板机
-    return await this.createProxyConnection(proxyConfig, targetHost, targetPort)
+    // 第一级跳板机
+    // 如果有底层代理，先连接代理
+    let socket: net.Socket | undefined
+    if (underlyingProxy && underlyingProxy.enabled) {
+      socket = await ProxyHelper.connect(underlyingProxy, proxyConfig.host, proxyConfig.port)
+    }
+
+    // 直接连接到第一级跳板机（如果有socket则使用socket）
+    return await this.createProxyConnection(proxyConfig, targetHost, targetPort, socket)
   }
 
   /**
@@ -81,7 +91,7 @@ export class ProxyJumpHelper {
 
             // 将 stream 包装成 net.Socket 兼容的对象
             const socket = stream as any as net.Socket
-            
+
             // 添加清理逻辑
             socket.on('close', () => {
               proxyClient.end()

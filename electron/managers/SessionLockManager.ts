@@ -10,7 +10,7 @@ import { EventEmitter } from 'events'
 export interface LockConfig {
   enabled: boolean
   autoLockTimeout: number // 自动锁定超时时间（分钟），0表示禁用
-  lockOnMinimize: boolean // 最小化时锁定
+  lockOnMinimize: boolean // 关闭到托盘时锁定（注意：不是普通最小化）
   lockOnSuspend: boolean // 系统休眠时锁定
   requirePasswordOnUnlock: boolean // 解锁时需要密码
   maxUnlockAttempts: number // 最大解锁尝试次数
@@ -208,9 +208,15 @@ export class SessionLockManager extends EventEmitter {
   /**
    * 锁定会话
    */
-  lock(): void {
+  lock(): { success: boolean; error?: string } {
+    // 检查是否设置了密码
+    if (!this.hasPassword()) {
+      console.log('[SessionLockManager] Cannot lock: no password set')
+      return { success: false, error: '请先设置锁定密码' }
+    }
+
     if (this.isLocked) {
-      return
+      return { success: true }
     }
 
     this.isLocked = true
@@ -220,6 +226,9 @@ export class SessionLockManager extends EventEmitter {
     BrowserWindow.getAllWindows().forEach(window => {
       window.webContents.send('session:locked')
     })
+
+    console.log('[SessionLockManager] Session locked')
+    return { success: true }
   }
 
   /**
@@ -331,23 +340,14 @@ export class SessionLockManager extends EventEmitter {
    * 设置系统监听器
    */
   private setupSystemListeners(): void {
-    // 监听窗口最小化
-    app.on('browser-window-blur', () => {
-      if (this.config.enabled && this.config.lockOnMinimize) {
-        // 检查是否所有窗口都最小化
-        const allMinimized = BrowserWindow.getAllWindows().every(
-          window => window.isMinimized() || !window.isVisible()
-        )
-        if (allMinimized) {
-          this.lock()
-        }
-      }
-    })
+    // 注意：窗口的 minimize 事件在 main.ts 中处理
+    // 这里只处理系统级别的事件
 
     // 监听系统休眠（需要 Electron 的 powerMonitor）
     const { powerMonitor } = require('electron')
     powerMonitor.on('suspend', () => {
-      if (this.config.enabled && this.config.lockOnSuspend) {
+      if (this.config.enabled && this.config.lockOnSuspend && this.hasPassword()) {
+        console.log('[SessionLockManager] System suspended, locking session')
         this.lock()
       }
     })

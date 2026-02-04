@@ -42,6 +42,11 @@ export interface AIConfig {
   temperature: number // 0.0 - 2.0
   maxTokens: number // 100 - 8000
   timeout: number // 5000 - 120000 ms
+  prompts?: {
+    explain?: string
+    optimize?: string
+    write?: string
+  }
 }
 
 /**
@@ -110,6 +115,11 @@ export interface AIProviderAdapter {
    * 发送请求
    */
   sendRequest(params: AIRequestParams): Promise<string>
+
+  /**
+   * 发送流式请求
+   */
+  streamRequest?(params: AIRequestParams, onChunk: (chunk: string) => void): Promise<string>
 
   /**
    * 取消请求

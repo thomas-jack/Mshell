@@ -4,7 +4,8 @@ import * as net from 'net'
 import { appSettingsManager } from '../utils/app-settings'
 import { ErrorHandler, AppError } from '../utils/error-handler'
 import { ProxyJumpHelper } from '../utils/proxy-jump'
-import type { ProxyJumpConfig } from '../../src/types/session'
+import { ProxyHelper } from '../utils/proxy'
+import type { ProxyJumpConfig, ProxyConfig } from '../../src/types/session'
 
 export interface SSHConnectionOptions {
   host: string
@@ -18,6 +19,7 @@ export interface SSHConnectionOptions {
   readyTimeout?: number
   sessionName?: string
   proxyJump?: ProxyJumpConfig
+  proxy?: ProxyConfig
 }
 
 export interface SSHConnection {
@@ -33,6 +35,7 @@ export interface SSHConnection {
   reconnectTimer?: NodeJS.Timeout
   maxReconnectAttempts?: number
   reconnectInterval?: number
+  shellPid?: number // Shell 进程的 PID，用于获取当前目录
 }
 
 /**
@@ -59,33 +62,37 @@ export class SSHConnectionManager extends EventEmitter {
       // Explicitly create socket to enable TCP_NODELAY for lower latency
       let socket: net.Socket
 
-      // 如果配置了跳板机，通过跳板机建立连接
-      if (options.proxyJump && options.proxyJump.enabled) {
-        try {
+      try {
+        if (options.proxyJump && options.proxyJump.enabled) {
           // 验证跳板机配置
           const validation = ProxyJumpHelper.validateProxyConfig(options.proxyJump)
           if (!validation.valid) {
             throw new Error(validation.error)
           }
 
-          // 通过跳板机建立连接
+          // 通过跳板机建立连接，传递底层代理配置（如果有）
           socket = await ProxyJumpHelper.connectThroughProxy(
             options.proxyJump,
             options.host,
-            options.port
+            options.port,
+            options.proxy // 传递底层代理
           )
-          
+
           // 发送跳板机连接成功事件
           const chainDesc = ProxyJumpHelper.getProxyChainDescription(options.proxyJump)
           this.emit('proxy-connected', id, chainDesc)
-        } catch (err: any) {
-          const appError = ErrorHandler.handle(err, `ProxyJump ${id}`)
-          reject(appError)
-          return
+        } else if (options.proxy && options.proxy.enabled) {
+          // 只有代理，没有跳板机 -> 通过代理连接目标主机
+          socket = await ProxyHelper.connect(options.proxy, options.host, options.port)
+          this.emit('proxy-connected', id, `Via ${options.proxy.type.toUpperCase()} Proxy`)
+        } else {
+          // 直接连接
+          socket = new net.Socket()
         }
-      } else {
-        // 直接连接
-        socket = new net.Socket()
+      } catch (err: any) {
+        const appError = ErrorHandler.handle(err, `Connection Init ${id}`)
+        reject(appError)
+        return
       }
 
       socket.setNoDelay(true)
@@ -174,6 +181,15 @@ export class SSHConnectionManager extends EventEmitter {
           // 启动会话监控（超时检测）
           this.startSessionMonitor(id)
 
+          // 获取 shell 的 PID（用于后续获取当前目录）
+          this.getShellPid(id).then(pid => {
+            if (pid) {
+              connection.shellPid = pid
+            }
+          }).catch(() => {
+            // 忽略错误，PID 获取失败不影响正常使用
+          })
+
           resolve()
         })
       })
@@ -191,7 +207,7 @@ export class SSHConnectionManager extends EventEmitter {
         connection.status = 'disconnected'
         this.stopSessionMonitor(id)
         this.emit('close', id)
-        
+
         // 尝试自动重连
         this.attemptReconnect(id)
       })
@@ -226,10 +242,15 @@ export class SSHConnectionManager extends EventEmitter {
         }
       }
 
-      // Connect the socket first
-      socket.connect(options.port, options.host, () => {
+      // 如果使用了代理或跳板机，socket 已经是连接状态，不需要再次 connect
+      if ((options.proxyJump && options.proxyJump.enabled) || (options.proxy && options.proxy.enabled)) {
         client.connect(connectConfig)
-      })
+      } else {
+        // 如果是新创建的 socket（未使用代理/跳板机），需要手动连接
+        socket.connect(options.port, options.host, () => {
+          client.connect(connectConfig)
+        })
+      }
     })
   }
 
@@ -245,7 +266,7 @@ export class SSHConnectionManager extends EventEmitter {
 
     // 取消重连
     this.cancelReconnect(id)
-    
+
     this.stopSessionMonitor(id)
 
     if (connection.stream) {
@@ -317,7 +338,7 @@ export class SSHConnectionManager extends EventEmitter {
 
         stream.on('close', (code: number) => {
           clearTimeout(timeoutHandle)
-          
+
           if (code === 0) {
             resolve(output)
           } else {
@@ -331,6 +352,58 @@ export class SSHConnectionManager extends EventEmitter {
         })
       })
     })
+  }
+
+  /**
+   * 获取 shell 进程的 PID
+   */
+  private async getShellPid(id: string): Promise<number | null> {
+    try {
+      // 使用 pgrep 或 ps 获取当前用户的 shell PID
+      const output = await this.executeCommand(id, 'echo $$', 3000)
+      const pid = parseInt(output.trim())
+      return isNaN(pid) ? null : pid
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 获取终端当前工作目录
+   */
+  async getCurrentDirectory(id: string): Promise<string> {
+    const connection = this.connections.get(id)
+    if (!connection) {
+      throw new Error(`Connection not found: ${id}`)
+    }
+
+    try {
+      // 方法1: 如果有 shell PID，通过 /proc/<pid>/cwd 获取
+      if (connection.shellPid) {
+        const output = await this.executeCommand(
+          id, 
+          `readlink /proc/${connection.shellPid}/cwd 2>/dev/null || pwd`,
+          3000
+        )
+        return output.trim()
+      }
+
+      // 方法2: 尝试获取最近的 bash/zsh/sh 进程的 cwd
+      const output = await this.executeCommand(
+        id,
+        `readlink /proc/$(pgrep -u $(whoami) -n "bash|zsh|sh" 2>/dev/null || echo self)/cwd 2>/dev/null || pwd`,
+        3000
+      )
+      return output.trim()
+    } catch {
+      // 降级：返回 home 目录
+      try {
+        const home = await this.executeCommand(id, 'echo $HOME', 2000)
+        return home.trim()
+      } catch {
+        return '/'
+      }
+    }
   }
 
   /**
@@ -415,11 +488,6 @@ export class SSHConnectionManager extends EventEmitter {
     const connection = this.connections.get(id)
     if (!connection) return
 
-    // 如果是用户主动断开，不重连
-    if (connection.status === 'disconnected' && !connection.reconnectAttempts) {
-      return
-    }
-
     // 检查是否超过最大重连次数
     if (connection.reconnectAttempts! >= connection.maxReconnectAttempts!) {
       console.log(`Max reconnect attempts reached for session ${id}`)
@@ -457,14 +525,14 @@ export class SSHConnectionManager extends EventEmitter {
 
         // 尝试重新连接
         await this.connect(id, connection.options)
-        
+
         // 重连成功，重置计数器
         connection.reconnectAttempts = 0
         console.log(`Successfully reconnected session ${id}`)
         this.emit('reconnected', id)
       } catch (error) {
         console.error(`Reconnect attempt ${connection.reconnectAttempts} failed for session ${id}:`, error)
-        
+
         // 继续尝试重连
         this.attemptReconnect(id)
       }

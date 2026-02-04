@@ -74,7 +74,28 @@ export class KeyboardShortcutManager {
    * 检查事件是否匹配快捷键
    */
   private matchesShortcut(event: KeyboardEvent, config: ShortcutConfig): boolean {
-    const keyMatch = event.key.toLowerCase() === config.key.toLowerCase()
+    // 使用 event.code 作为备选，因为 Alt 键可能改变 event.key 的值
+    const configKeyLower = config.key.toLowerCase()
+    const eventKeyLower = event.key.toLowerCase()
+    
+    // 特殊按键映射 (key -> code)
+    const keyToCode: Record<string, string> = {
+      'a': 'KeyA', 'b': 'KeyB', 'c': 'KeyC', 'd': 'KeyD', 'e': 'KeyE',
+      'f': 'KeyF', 'g': 'KeyG', 'h': 'KeyH', 'i': 'KeyI', 'j': 'KeyJ',
+      'k': 'KeyK', 'l': 'KeyL', 'm': 'KeyM', 'n': 'KeyN', 'o': 'KeyO',
+      'p': 'KeyP', 'q': 'KeyQ', 'r': 'KeyR', 's': 'KeyS', 't': 'KeyT',
+      'u': 'KeyU', 'v': 'KeyV', 'w': 'KeyW', 'x': 'KeyX', 'y': 'KeyY',
+      'z': 'KeyZ',
+      '1': 'Digit1', '2': 'Digit2', '3': 'Digit3', '4': 'Digit4', '5': 'Digit5',
+      '6': 'Digit6', '7': 'Digit7', '8': 'Digit8', '9': 'Digit9', '0': 'Digit0',
+      ',': 'Comma', '.': 'Period', '/': 'Slash', ';': 'Semicolon',
+      'tab': 'Tab', 'enter': 'Enter', 'escape': 'Escape', 'space': 'Space'
+    }
+    
+    const expectedCode = keyToCode[configKeyLower]
+    const keyMatch = eventKeyLower === configKeyLower || 
+                     (expectedCode && event.code === expectedCode)
+    
     const ctrlMatch = !!config.ctrl === (event.ctrlKey || event.metaKey) // 支持 Mac Command 键
     const altMatch = !!config.alt === event.altKey
     const shiftMatch = !!config.shift === event.shiftKey

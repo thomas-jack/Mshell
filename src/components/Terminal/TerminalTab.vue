@@ -36,8 +36,9 @@
             type="primary"
             link
             :icon="Document"
-            @click="showSnippetDialog = true"
+            @click="showSnippetDialog = !showSnippetDialog"
             class="action-btn"
+            :class="{ 'is-active': showSnippetDialog }"
           />
         </el-tooltip>
         <el-tooltip content="Search" placement="bottom">
@@ -110,8 +111,33 @@
       </div>
     </transition>
     
+    <!-- 断线通知栏 -->
+    <transition name="slide-down">
+      <div v-if="showDisconnectedNotification" class="disconnected-notification">
+        <div class="reconnect-content">
+          <el-icon class="disconnected-icon"><CircleClose /></el-icon>
+          <span class="reconnect-text">连接已断开</span>
+          <el-button 
+            size="small" 
+            type="primary"
+            @click="handleManualReconnect"
+            :loading="isManualReconnecting"
+          >
+            重新连接
+          </el-button>
+          <el-button 
+            size="small" 
+            link
+            @click="showDisconnectedNotification = false"
+          >
+            关闭
+          </el-button>
+        </div>
+      </div>
+    </transition>
+    
     <div class="terminal-body">
-      <div class="terminal-content" :class="{ 'with-monitor': showMonitor, 'with-history': showCommandHistory, 'with-ai': showTerminalAI }">
+      <div class="terminal-content" :class="{ 'with-monitor': showMonitor, 'with-history': showCommandHistory, 'with-ai': showTerminalAI, 'with-snippet': showSnippetDialog }">
         <TerminalView
           v-if="isConnected"
           :connection-id="connectionId"
@@ -119,8 +145,10 @@
           :options="terminalOptions"
           ref="terminalRef"
           @input="handleTerminalInput"
+          @data="handleTerminalData"
           @cursor-position="handleCursorPosition"
           @ai-request="handleAIRequest"
+          @ssh-output="handleSSHOutput"
         />
         <div v-else class="connecting-overlay">
           <div class="loader"></div>
@@ -141,6 +169,36 @@
           :session-id="connectionId"
           @select="handleAutocompleteSelect"
           @close="showAutocomplete = false"
+        />
+        
+        <!-- 内联预览补全 (Ghost Text) -->
+        <GhostText
+          :visible="showGhostText"
+          :ghost-text="ghostText"
+          :cursor-position="autocompleteCursorPosition"
+          :font-size="terminalOptions?.fontSize || 14"
+          :font-family="terminalOptions?.fontFamily || 'Consolas, monospace'"
+        />
+        
+        <!-- AI 命令建议 -->
+        <AICommandSuggest
+          ref="aiCommandSuggestRef"
+          :visible="showAICommandSuggest"
+          :query="aiCommandQuery"
+          :position="autocompleteCursorPosition"
+          :session-id="connectionId"
+          @execute="handleAICommandExecute"
+          @edit="handleAICommandEdit"
+          @close="showAICommandSuggest = false"
+        />
+        
+        <!-- 命令解释 -->
+        <CommandExplain
+          ref="commandExplainRef"
+          :visible="showCommandExplain"
+          :command="explainCommand"
+          :position="autocompleteCursorPosition"
+          @close="showCommandExplain = false"
         />
       </div>
       
@@ -166,100 +224,98 @@
             :connection-id="connectionId" 
             :session-name="session?.name"
             :storage-id="aiStorageId"
+            :current-dir="currentWorkingDir"
             @close="showTerminalAI = false"
           />
         </div>
       </transition>
-    </div>
-    
-    <!-- Snippet Drawer -->
-    <transition name="slide-right">
-      <div v-if="showSnippetDialog" class="snippet-drawer">
-        <div class="drawer-header">
-          <h3>命令片段</h3>
-          <el-button :icon="Close" link @click="showSnippetDialog = false" />
-        </div>
-        
-        <div class="snippet-drawer-content">
-          <!-- 搜索栏 -->
-          <div class="drawer-search">
-            <el-input
-              v-model="snippetSearch"
-              placeholder="搜索片段..."
-              :prefix-icon="Search"
-              clearable
-            />
+      
+      <!-- 命令片段面板 -->
+      <transition name="slide-left">
+        <div v-if="showSnippetDialog" class="snippet-sidebar">
+          <div class="sidebar-header">
+            <h3>命令片段</h3>
+            <el-button :icon="Close" link @click="showSnippetDialog = false" />
           </div>
-
-          <!-- 分类过滤 -->
-          <div class="category-filter">
-            <div 
-              class="category-item"
-              :class="{ active: filterCategory === '' }"
-              @click="filterCategory = ''"
-            >
-              <span>全部</span>
-              <el-tag size="small" round>{{ snippets.length }}</el-tag>
-            </div>
-            <div 
-              v-for="cat in categories"
-              :key="cat"
-              class="category-item"
-              :class="{ active: filterCategory === cat }"
-              @click="filterCategory = cat"
-            >
-              <span>{{ cat }}</span>
-              <el-tag size="small" round>{{ getCategoryCount(cat) }}</el-tag>
-            </div>
-          </div>
-
-          <!-- 标签过滤 -->
-          <div v-if="allTags.length > 0" class="tag-filter">
-            <div class="filter-title">标签筛选</div>
-            <div class="tag-list">
-              <el-tag
-                v-for="tag in allTags"
-                :key="tag"
-                :type="filterTags.includes(tag) ? 'primary' : 'info'"
-                size="small"
-                @click="toggleTag(tag)"
-                style="cursor: pointer; margin: 2px;"
-              >
-                {{ tag }}
-              </el-tag>
-            </div>
-          </div>
-
-          <!-- 命令列表 -->
-          <div class="snippet-list">
-            <div
-              v-for="snippet in filteredSnippets"
-              :key="snippet.id"
-              class="snippet-item"
-              @click="selectSnippet(snippet)"
-            >
-              <div class="snippet-header">
-                <div class="snippet-name">{{ snippet.name }}</div>
-                <div class="snippet-meta">
-                  <el-tag v-if="snippet.category" size="small" type="info">
-                    {{ snippet.category }}
-                  </el-tag>
-                  <span class="usage-count">{{ snippet.usageCount }}次</span>
+          <div class="snippet-panel-content">
+            <!-- 左侧：分类和标签 -->
+            <div class="snippet-categories">
+              <div class="category-section">
+                <div class="section-title">分类</div>
+                <div class="category-list">
+                  <div 
+                    class="category-item"
+                    :class="{ active: filterCategory === '' }"
+                    @click="filterCategory = ''"
+                  >
+                    <span>全部</span>
+                    <el-tag size="small" round>{{ snippets.length }}</el-tag>
+                  </div>
+                  <div 
+                    v-for="cat in categories"
+                    :key="cat"
+                    class="category-item"
+                    :class="{ active: filterCategory === cat }"
+                    @click="filterCategory = cat"
+                  >
+                    <span>{{ cat }}</span>
+                    <el-tag size="small" round>{{ getCategoryCount(cat) }}</el-tag>
+                  </div>
                 </div>
               </div>
-              <div class="snippet-command">{{ snippet.command }}</div>
-              <div class="snippet-tags" v-if="snippet.tags && snippet.tags.length">
-                <span v-for="tag in snippet.tags" :key="tag" class="tag">{{ tag }}</span>
+              <div v-if="allTags.length > 0" class="category-section">
+                <div class="section-title">标签</div>
+                <div class="tag-list">
+                  <el-tag
+                    v-for="tag in allTags"
+                    :key="tag"
+                    :type="filterTags.includes(tag) ? 'primary' : 'info'"
+                    size="small"
+                    @click="toggleTag(tag)"
+                    style="cursor: pointer; margin: 2px;"
+                  >
+                    {{ tag }}
+                  </el-tag>
+                </div>
               </div>
             </div>
-            <div v-if="filteredSnippets.length === 0" class="empty-snippets">
-              <el-icon :size="48"><Document /></el-icon>
-              <p>未找到匹配的片段</p>
+            <!-- 右侧：搜索和列表 -->
+            <div class="snippet-main">
+              <div class="snippet-search">
+                <el-input
+                  v-model="snippetSearch"
+                  placeholder="搜索片段..."
+                  :prefix-icon="Search"
+                  clearable
+                  size="small"
+                />
+              </div>
+              <div class="snippet-list">
+                <div
+                  v-for="snippet in filteredSnippets"
+                  :key="snippet.id"
+                  class="snippet-item"
+                  @click="selectSnippet(snippet)"
+                >
+                  <div class="snippet-header">
+                    <div class="snippet-name">{{ snippet.name }}</div>
+                    <span class="usage-count">{{ snippet.usageCount }}次</span>
+                  </div>
+                  <div class="snippet-command">{{ snippet.command }}</div>
+                  <div class="snippet-tags" v-if="snippet.tags && snippet.tags.length">
+                    <span v-for="tag in snippet.tags" :key="tag" class="tag">{{ tag }}</span>
+                  </div>
+                </div>
+                <div v-if="filteredSnippets.length === 0" class="empty-snippets">
+                  <el-icon :size="32"><Document /></el-icon>
+                  <p>未找到匹配的片段</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </transition>
+      </transition>
+    </div>
     
     <!-- Variable Input Dialog -->
     <el-dialog v-model="showVariableDialog" title="Enter Variables" width="500px" class="custom-dialog">
@@ -289,7 +345,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { Close, Loading, Search, Document, Brush, Monitor, Clock, ChatDotRound } from '@element-plus/icons-vue'
+import { Close, Loading, Search, Document, Brush, Monitor, Clock, ChatDotRound, CircleClose } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TerminalView from './TerminalView.vue'
 import TerminalSearch from './TerminalSearch.vue'
@@ -297,8 +353,13 @@ import CommandAutocomplete from './CommandAutocomplete.vue'
 import CommandHistoryPanel from './CommandHistoryPanel.vue'
 import ServerMonitorPanel from '../Monitor/ServerMonitorPanel.vue'
 import TerminalAIChatPanel from '../AI/TerminalAIChatPanel.vue'
+import GhostText from './GhostText.vue'
+import AICommandSuggest from './AICommandSuggest.vue'
+import CommandExplain from './CommandExplain.vue'
 import { themes } from '@/utils/terminal-themes'
 import { terminalManager } from '@/utils/terminal-manager'
+import { getInlineSuggestion, shouldShowInlineSuggestion } from '@/utils/autocomplete/inline-suggest'
+import { isExplainQuery, parseExplainQuery } from '@/utils/command-intelligence'
 import type { SessionConfig as BaseSessionConfig } from '@/types/session'
 import { useAppStore } from '@/stores/app'
 
@@ -329,11 +390,15 @@ interface Props {
   session: SessionConfig
   terminalOptions?: any
   hideCloseButton?: boolean
+  broadcastMode?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  broadcastMode: false
+})
 const emit = defineEmits<{
   close: [connectionId: string]
+  'broadcast-input': [data: string, sourceId: string]
 }>()
 
 // AI 历史记录存储 ID：优先使用 session ID（如果是保存的会话），否则使用连接 ID
@@ -348,6 +413,8 @@ const showSearch = ref(false)
 const reconnectAttempt = ref(0)
 const reconnectMaxAttempts = ref(0)
 const showReconnectNotification = ref(false)
+const showDisconnectedNotification = ref(false)
+const isManualReconnecting = ref(false)
 const showSnippetDialog = ref(false)
 const showVariableDialog = ref(false)
 const showMonitor = ref(false)
@@ -365,6 +432,34 @@ const showAutocomplete = ref(false)
 const autocompleteInput = ref('')
 const autocompleteCursorPosition = ref({ x: 0, y: 0 })
 
+// 内联预览补全 (Ghost Text)
+const showGhostText = ref(false)
+const ghostText = ref('')
+const ghostFullText = ref('')
+
+// AI 命令建议 (# 触发)
+const showAICommandSuggest = ref(false)
+const aiCommandQuery = ref('')
+const aiCommandSuggestRef = ref()
+
+// 命令智能功能
+const showCommandExplain = ref(false)
+const explainCommand = ref('')
+const commandExplainRef = ref()
+
+// 命令智能设置（从设置中加载）
+const commandIntelligenceSettings = ref({
+  commandAutocomplete: true,
+  aiCommandSuggest: true,
+  commandExplain: true
+})
+
+// Ghost text 请求 ID（用于取消过期请求）
+let ghostTextRequestId = 0
+
+// 当前工作目录（从终端提示符解析）- 备用方案
+const currentWorkingDir = ref('')
+
 // 搜索相关状态
 const currentSearchTerm = ref('')
 const currentSearchOptions = ref({ caseSensitive: false, regex: false })
@@ -375,6 +470,15 @@ const currentTheme = computed(() => props.terminalOptions?.theme || 'dark')
 
 // 键盘事件清理函数（在顶层定义，供 onUnmounted 使用）
 let cleanupKeyboard: (() => void) | null = null
+
+// 监听标签页切换，当切换到其他标签页时清理补全状态
+// 这可以防止多标签页时的状态污染
+watch(() => useAppStore().activeTab, (newActiveTab) => {
+  if (newActiveTab !== props.connectionId) {
+    // 当前标签页不再激活，清理所有智能功能状态
+    clearAllIntelligenceStates()
+  }
+})
 
 const filteredSnippets = computed(() => {
   let result = snippets.value
@@ -500,6 +604,7 @@ const setupReconnectListeners = () => {
       connectionStatus.value = 'error'
       isConnected.value = false
       showReconnectNotification.value = false
+      showDisconnectedNotification.value = true
       reconnectAttempt.value = 0
       
       ElMessage.error({
@@ -515,6 +620,7 @@ const handleCancelReconnect = async () => {
   try {
     await window.electronAPI.ssh.cancelReconnect(props.connectionId)
     showReconnectNotification.value = false
+    showDisconnectedNotification.value = true
     reconnectAttempt.value = 0
     ElMessage.info('已取消重连')
   } catch (error: any) {
@@ -522,13 +628,144 @@ const handleCancelReconnect = async () => {
   }
 }
 
+// 加载命令智能设置
+const loadCommandIntelligenceSettings = async () => {
+  try {
+    const settings = await window.electronAPI.settings.get()
+    const sshSettings = settings?.ssh || {}
+    
+    commandIntelligenceSettings.value = {
+      commandAutocomplete: sshSettings.commandAutocomplete !== false,
+      aiCommandSuggest: sshSettings.aiCommandSuggest !== false,
+      commandExplain: sshSettings.commandExplain !== false
+    }
+    console.log('[TerminalTab] Loaded command intelligence settings:', commandIntelligenceSettings.value)
+  } catch (error) {
+    console.error('Failed to load command intelligence settings:', error)
+  }
+}
+
+// 手动重连
+const handleManualReconnect = async () => {
+  if (!props.sessionId) return
+  
+  isManualReconnecting.value = true
+  showDisconnectedNotification.value = false
+  
+  try {
+    // 获取会话配置
+    const session = await window.electronAPI.session.get(props.sessionId)
+    if (!session) {
+      ElMessage.error('会话不存在')
+      return
+    }
+    
+    // 断开旧连接
+    try {
+      await window.electronAPI.ssh.disconnect(props.connectionId)
+    } catch (e) {
+      // 忽略断开错误
+    }
+    
+    // 重新连接
+    connectionStatus.value = 'connecting'
+    const result = await window.electronAPI.ssh.connect(props.connectionId, session)
+    
+    if (result.success) {
+      connectionStatus.value = 'connected'
+      isConnected.value = true
+      ElMessage.success('重连成功！')
+    } else {
+      connectionStatus.value = 'error'
+      showDisconnectedNotification.value = true
+      ElMessage.error(result.error || '重连失败')
+    }
+  } catch (error: any) {
+    connectionStatus.value = 'error'
+    showDisconnectedNotification.value = true
+    ElMessage.error(`重连失败: ${error.message}`)
+  } finally {
+    isManualReconnecting.value = false
+  }
+}
+
 onMounted(async () => {
   // Load snippets
   loadSnippets()
   
-  // 添加键盘事件监听（处理补全弹窗）
+  // 获取 appStore 用于检查当前激活的标签页
+  const appStore = useAppStore()
+  
+  // 添加键盘事件监听（处理补全弹窗、Ghost Text、AI 命令）
   const handleKeyDown = (e: KeyboardEvent) => {
-    // 只在补全弹窗显示时处理键盘事件
+    // 首先检查当前标签页是否激活，避免多标签页时的事件冲突
+    // 只有当前激活的标签页才处理键盘事件
+    if (appStore.activeTab !== props.connectionId) {
+      return // 不是当前激活的标签页，不处理
+    }
+    
+    // 0. 命令解释模式
+    if (showCommandExplain.value) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        showCommandExplain.value = false
+        return
+      }
+      return
+    }
+    
+    // 1. AI 命令建议模式
+    if (showAICommandSuggest.value) {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        e.stopPropagation()
+        // 检查是否正在加载或没有建议
+        const isLoading = aiCommandSuggestRef.value?.isLoading?.()
+        const suggestion = aiCommandSuggestRef.value?.getSuggestion?.()
+        if (!isLoading && suggestion) {
+          handleAICommandExecute(suggestion)
+        }
+        return
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        e.stopPropagation()
+        const isLoading = aiCommandSuggestRef.value?.isLoading?.()
+        const suggestion = aiCommandSuggestRef.value?.getSuggestion?.()
+        if (!isLoading && suggestion) {
+          handleAICommandEdit(suggestion)
+        }
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        showAICommandSuggest.value = false
+        aiCommandQuery.value = ''
+        return
+      }
+      return
+    }
+    
+    // 2. Ghost Text 模式 - Tab 接受补全（不拦截 ArrowRight，避免与光标移动冲突）
+    if (showGhostText.value && ghostText.value) {
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        e.stopPropagation()
+        acceptGhostText()
+        return
+      }
+      // Escape 关闭 ghost text
+      if (e.key === 'Escape') {
+        showGhostText.value = false
+        ghostText.value = ''
+        return
+      }
+      // 其他按键会自动清除 ghost text（在 handleTerminalInput 中处理）
+    }
+    
+    // 3. 弹窗补全模式
     if (!showAutocomplete.value) return
     
     // 检查是否有建议
@@ -551,6 +788,8 @@ onMounted(async () => {
         // 用户没有主动选择，关闭弹窗，让 Enter 正常执行命令
         showAutocomplete.value = false
         autocompleteInput.value = ''
+        showGhostText.value = false
+        ghostText.value = ''
         // 不阻止事件，让终端正常处理
       }
       return
@@ -590,6 +829,8 @@ onMounted(async () => {
           // 关闭补全
           showAutocomplete.value = false
           autocompleteInput.value = ''
+          showGhostText.value = false
+          ghostText.value = ''
           break
       }
     }
@@ -609,9 +850,25 @@ onMounted(async () => {
     if (connectedIds.has(props.connectionId)) {
       isConnected.value = true
       connectionStatus.value = 'connected'
+    } else if (connectingIds.has(props.connectionId)) {
+      // 连接正在进行中，等待连接完成
+      connectionStatus.value = 'connecting'
+      // 检查终端实例是否已经存在且有数据（说明已经连接成功）
+      const instance = terminalManager.get(props.connectionId)
+      if (instance?.terminal) {
+        // 终端实例存在，说明连接已经成功，只是状态没同步
+        isConnected.value = true
+        connectionStatus.value = 'connected'
+        connectedIds.add(props.connectionId)
+        connectingIds.delete(props.connectionId)
+      }
     }
     // 设置重连事件监听器（即使复用连接也需要监听）
     setupReconnectListeners()
+    
+    // 复用连接时也需要加载设置
+    loadCommandIntelligenceSettings()
+    
     return
   }
   
@@ -626,6 +883,9 @@ onMounted(async () => {
     const settings = await window.electronAPI.settings.get()
     const sshSettings = settings?.ssh || {}
     
+    // 加载命令智能设置（使用统一函数）
+    await loadCommandIntelligenceSettings()
+    
     // Connect to SSH
     const result = await window.electronAPI.ssh.connect(props.connectionId, {
       host: props.session.host,
@@ -638,7 +898,10 @@ onMounted(async () => {
       readyTimeout: (sshSettings.timeout || 30) * 1000, // 转换为毫秒
       keepaliveInterval: sshSettings.keepalive ? (sshSettings.keepaliveInterval || 60) * 1000 : undefined,
       keepaliveCountMax: sshSettings.keepalive ? 3 : undefined,
-      sessionName: props.session.name
+      sessionName: props.session.name,
+      // 跳板机和代理配置
+      proxyJump: props.session.proxyJump,
+      proxy: props.session.proxy
     })
 
     if (result.success) {
@@ -674,6 +937,20 @@ onUnmounted(async () => {
   if (cleanupKeyboard) {
     cleanupKeyboard()
     cleanupKeyboard = null
+  }
+  
+  // 清理 AI 建议防抖定时器
+  if (aiSuggestDebounceTimer) {
+    clearTimeout(aiSuggestDebounceTimer)
+    aiSuggestDebounceTimer = null
+  }
+  
+  // 清理所有智能功能状态，避免状态污染
+  clearAllIntelligenceStates()
+  
+  // 强制重置 autocomplete 组件
+  if (autocompleteRef.value?.forceReset) {
+    autocompleteRef.value.forceReset()
   }
   
   // 清理资源
@@ -840,6 +1117,18 @@ watch(showSnippetDialog, (newValue) => {
     filterTags.value = []
     snippetSearch.value = ''
   }
+  // 侧边栏状态变化时，延迟调整终端大小
+  setTimeout(() => {
+    terminalRef.value?.fit?.()
+  }, 300)
+})
+
+// 监听所有侧边栏状态变化，调整终端大小
+watch([showMonitor, showCommandHistory, showTerminalAI], () => {
+  // 侧边栏状态变化时，延迟调整终端大小
+  setTimeout(() => {
+    terminalRef.value?.fit?.()
+  }, 300)
 })
 
 const getCategoryCount = (category: string) => {
@@ -902,24 +1191,181 @@ const executeSnippet = async () => {
   }
 }
 
+// AI 命令建议防抖定时器
+let aiSuggestDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// 清除所有智能功能状态（用于模式切换时避免状态污染）
+const clearAllIntelligenceStates = (except?: 'autocomplete' | 'aiSuggest' | 'explain') => {
+  if (except !== 'autocomplete') {
+    showAutocomplete.value = false
+    autocompleteInput.value = '' // 同时清空输入，避免状态不一致
+    // 强制重置 autocomplete 组件状态
+    if (autocompleteRef.value?.forceReset) {
+      autocompleteRef.value.forceReset()
+    }
+  }
+  if (except !== 'aiSuggest') {
+    showAICommandSuggest.value = false
+    aiCommandQuery.value = ''
+    if (aiSuggestDebounceTimer) {
+      clearTimeout(aiSuggestDebounceTimer)
+      aiSuggestDebounceTimer = null
+    }
+  }
+  if (except !== 'explain') {
+    showCommandExplain.value = false
+    explainCommand.value = ''
+  }
+  showGhostText.value = false
+  ghostText.value = ''
+}
+
 // 处理终端输入（用于智能补全）
-const handleTerminalInput = (input: string) => {
-  autocompleteInput.value = input
+const handleTerminalInput = async (input: string) => {
+  console.log(`[TerminalTab] handleTerminalInput called: input="${input}"`)
   
-  // 智能显示补全的条件：
-  // 1. 输入不为空
-  // 2. 不是特殊字符（回车、换行）
-  // 3. 输入长度 >= 1（至少一个字符）
-  // 4. 对于快捷命令（/开头），立即显示
-  // 5. 对于普通命令，至少2个字符才显示
+  // 保存原始输入用于各种模式判断
+  const rawInput = input
   
-  const shouldShow = input && 
-                     input.length > 0 && 
-                     !input.endsWith('\n') && 
-                     !input.endsWith('\r') &&
-                     (input.startsWith('/') || input.length >= 2)
+  // 0. 命令解释模式 (? 开头或结尾) - 需要检查开关
+  if (commandIntelligenceSettings.value.commandExplain && isExplainQuery(rawInput)) {
+    const command = parseExplainQuery(rawInput)
+    if (command && command.length >= 2) {
+      // 清除其他所有状态，避免状态污染
+      clearAllIntelligenceStates('explain')
+      // 不更新 autocompleteInput，因为命令解释模式不需要补全
+      explainCommand.value = command
+      showCommandExplain.value = true
+      return
+    }
+  } else {
+    // 不是解释查询，关闭解释面板
+    if (showCommandExplain.value) {
+      showCommandExplain.value = false
+    }
+  }
   
-  showAutocomplete.value = Boolean(shouldShow)
+  // 1. AI 命令模式 (# 开头) - 检查开关
+  if (rawInput.startsWith('#') && commandIntelligenceSettings.value.aiCommandSuggest) {
+    const query = rawInput.substring(1).trim()
+    console.log('[TerminalTab] AI command mode, input:', rawInput, 'query:', query)
+    
+    // 更新 autocompleteInput 以便执行时能正确清除输入
+    autocompleteInput.value = rawInput
+    
+    // 只有当 query 有实际内容时才显示 AI 建议
+    if (query.length >= 2) {
+      // 清除其他状态
+      clearAllIntelligenceStates('aiSuggest')
+      
+      // 防抖：用户停止输入 800ms 后才触发 AI 请求
+      if (aiSuggestDebounceTimer) {
+        clearTimeout(aiSuggestDebounceTimer)
+      }
+      
+      // 立即显示面板（显示加载状态）
+      showAICommandSuggest.value = true
+      
+      aiSuggestDebounceTimer = setTimeout(() => {
+        // 只有当 query 真正变化时才更新（触发 AI 请求）
+        if (aiCommandQuery.value !== query) {
+          aiCommandQuery.value = query
+          console.log('[TerminalTab] AI query updated:', query)
+        }
+      }, 800)
+    } else {
+      // query 太短，隐藏 AI 建议但不显示其他补全
+      clearAllIntelligenceStates()
+    }
+    return
+  } else if (rawInput.startsWith('#') && !commandIntelligenceSettings.value.aiCommandSuggest) {
+    // AI 命令建议已关闭，不处理 # 开头的输入
+    clearAllIntelligenceStates()
+    return
+  } else {
+    // 不是 # 开头，清除 AI 建议状态
+    if (showAICommandSuggest.value) {
+      showAICommandSuggest.value = false
+      aiCommandQuery.value = ''
+    }
+    if (aiSuggestDebounceTimer) {
+      clearTimeout(aiSuggestDebounceTimer)
+      aiSuggestDebounceTimer = null
+    }
+  }
+  
+  // 如果命令补全已关闭，直接返回
+  if (!commandIntelligenceSettings.value.commandAutocomplete) {
+    showAutocomplete.value = false
+    autocompleteInput.value = '' // 同时清空输入
+    showGhostText.value = false
+    return
+  }
+  
+  // 从这里开始，更新 autocompleteInput（仅用于补全模式）
+  autocompleteInput.value = rawInput
+  
+  // 2. 快捷命令模式 (/ 开头) - 检查开关
+  if (rawInput.startsWith('/') && commandIntelligenceSettings.value.commandAutocomplete) {
+    showGhostText.value = false
+    showAutocomplete.value = true
+    return
+  } else if (rawInput.startsWith('/')) {
+    // 命令补全已关闭
+    showAutocomplete.value = false
+    showGhostText.value = false
+    return
+  }
+  
+  // 3. 内联预览补全 (Ghost Text) - 检查开关
+  if (commandIntelligenceSettings.value.commandAutocomplete && shouldShowInlineSuggestion(rawInput)) {
+    const currentRequestId = ++ghostTextRequestId
+    try {
+      const suggestion = await getInlineSuggestion(rawInput, props.connectionId)
+      // 检查请求是否过期
+      if (currentRequestId !== ghostTextRequestId) return
+      
+      if (suggestion && suggestion.ghostText) {
+        ghostText.value = suggestion.ghostText
+        ghostFullText.value = suggestion.text
+        showGhostText.value = true
+      } else {
+        showGhostText.value = false
+        ghostText.value = ''
+      }
+    } catch (e) {
+      if (currentRequestId === ghostTextRequestId) {
+        showGhostText.value = false
+      }
+    }
+  } else {
+    showGhostText.value = false
+    ghostText.value = ''
+  }
+  
+  // 4. 弹窗补全（与内联预览共存）- 检查开关
+  if (commandIntelligenceSettings.value.commandAutocomplete) {
+    const shouldShowPopup = rawInput && 
+                       rawInput.length > 0 && 
+                       !rawInput.endsWith('\n') && 
+                       !rawInput.endsWith('\r') &&
+                       rawInput.length >= 2
+    
+    if (shouldShowPopup) {
+      // 显示补全时清除其他状态
+    }
+    showAutocomplete.value = Boolean(shouldShowPopup)
+  } else {
+    showAutocomplete.value = false
+  }
+}
+
+// 处理终端数据（用于广播模式）
+const handleTerminalData = (data: string) => {
+  // 如果启用了广播模式，向父组件发送广播事件
+  if (props.broadcastMode) {
+    emit('broadcast-input', data, props.connectionId)
+  }
 }
 
 // 处理光标位置（用于定位补全弹窗）
@@ -974,7 +1420,8 @@ const handleAutocompleteSelect = (text: string) => {
     // --- 连续补全逻辑 (Continuous Completion) ---
     // 如果补全文本自带空格 (如 "restart ")，说明用户可能需要立即补全下一个参数
     // 我们手动更新 input 状态，并保持弹窗打开
-    if (text.endsWith(' ')) {
+    // 注意：需要检查 commandAutocomplete 开关是否开启
+    if (text.endsWith(' ') && commandIntelligenceSettings.value.commandAutocomplete) {
         autocompleteInput.value = newCommand
         // 确保符合显示条件 (非空等)，通常来说加上命令后肯定符合
         showAutocomplete.value = true
@@ -982,9 +1429,115 @@ const handleAutocompleteSelect = (text: string) => {
     }
   }
   
-  // 默认：补全结束，关闭弹窗
+  // 默认：补全结束，关闭弹窗并清理状态
   showAutocomplete.value = false
   autocompleteInput.value = ''
+  showGhostText.value = false
+  ghostText.value = ''
+  
+  // 强制重置 CommandAutocomplete 组件的所有状态，确保下次能正常触发
+  if (autocompleteRef.value) {
+    autocompleteRef.value.forceReset?.()
+  }
+}
+
+// 处理 Ghost Text 接受（Tab 或 → 键）
+const acceptGhostText = () => {
+  if (!showGhostText.value || !ghostText.value) return false
+  
+  // 发送补全文本到终端
+  window.electronAPI.ssh.write(props.connectionId, ghostText.value)
+  
+  // 更新命令缓冲
+  if (terminalRef.value) {
+    terminalRef.value.updateCommandBuffer?.(ghostFullText.value)
+  }
+  
+  // 清除 ghost text
+  showGhostText.value = false
+  ghostText.value = ''
+  ghostFullText.value = ''
+  
+  return true
+}
+
+// 处理 AI 命令执行
+const handleAICommandExecute = async (command: string) => {
+  if (!command) return
+  
+  // 使用 Ctrl+U 清除当前行输入，然后发送新命令
+  // \x15 = Ctrl+U (清除光标前的所有内容)
+  // \x0b = Ctrl+K (清除光标后的所有内容，可选)
+  window.electronAPI.ssh.write(props.connectionId, '\x15' + command + '\r')
+  
+  // 记录 AI 生成的命令到历史
+  try {
+    await window.electronAPI.commandHistory?.add?.({
+      command,
+      sessionId: props.connectionId,
+      sessionName: props.session.name || 'Unknown Session',
+      duration: undefined
+    })
+  } catch (error) {
+    console.error('Failed to record AI command:', error)
+  }
+  
+  // 更新命令缓冲
+  if (terminalRef.value) {
+    terminalRef.value.updateCommandBuffer?.('')
+  }
+  
+  // 关闭 AI 建议
+  showAICommandSuggest.value = false
+  aiCommandQuery.value = ''
+  autocompleteInput.value = ''
+  
+  // 聚焦终端
+  setTimeout(() => terminalRef.value?.focus(), 50)
+}
+
+// 处理 AI 命令编辑（Tab 键）
+const handleAICommandEdit = (command: string) => {
+  if (!command) return
+  
+  // 使用 Ctrl+U 清除当前行输入，然后发送新命令（不执行）
+  window.electronAPI.ssh.write(props.connectionId, '\x15' + command)
+  
+  // 更新命令缓冲
+  if (terminalRef.value) {
+    terminalRef.value.updateCommandBuffer?.(command)
+  }
+  
+  // 关闭 AI 建议
+  showAICommandSuggest.value = false
+  aiCommandQuery.value = ''
+  autocompleteInput.value = command
+  
+  // 聚焦终端
+  setTimeout(() => terminalRef.value?.focus(), 50)
+}
+
+// ========== 命令智能功能 ==========
+
+// 处理命令解释查询（? 触发）
+const handleExplainQuery = (input: string) => {
+  // 检查开关是否开启
+  if (!commandIntelligenceSettings.value.commandExplain) return false
+  
+  if (isExplainQuery(input)) {
+    const command = parseExplainQuery(input)
+    if (command) {
+      explainCommand.value = command
+      showCommandExplain.value = true
+      return true
+    }
+  }
+  return false
+}
+
+// 处理 SSH 输出（预留接口）
+const handleSSHOutput = (_output: string) => {
+  // 预留接口，可用于未来扩展
 }
 
 defineExpose({
@@ -1168,6 +1721,10 @@ defineExpose({
   flex: 1;
 }
 
+.terminal-content.with-snippet {
+  flex: 1;
+}
+
 .history-sidebar {
   width: 480px;
   background: var(--bg-main);
@@ -1253,68 +1810,80 @@ defineExpose({
   letter-spacing: 0.5px;
 }
 
-/* Snippet Drawer Styling */
-.snippet-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
+/* Snippet Sidebar - 左右布局样式 */
+.snippet-sidebar {
   width: 480px;
-  background: var(--bg-main);
+  background: var(--bg-secondary);
   border-left: 1px solid var(--border-color);
-  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  z-index: 2000;
 }
 
-.drawer-header {
+.sidebar-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border-color);
-  background: var(--bg-secondary);
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
 }
 
-.drawer-header h3 {
+.sidebar-header h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.snippet-drawer-content {
+.snippet-panel-content {
   flex: 1;
   display: flex;
-  flex-direction: column;
   overflow: hidden;
 }
 
-.drawer-search {
-  padding: 12px;
-  border-bottom: 1px solid var(--border-color);
+/* 左侧分类区域 */
+.snippet-categories {
+  width: 140px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-color);
   background: var(--bg-main);
+  overflow-y: auto;
 }
 
-.category-filter {
-  flex-shrink: 0;
+.category-section {
   padding: 8px 0;
   border-bottom: 1px solid var(--border-color);
-  max-height: 180px;
+}
+
+.category-section:last-child {
+  border-bottom: none;
+}
+
+.section-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  padding: 0 10px 6px;
+  letter-spacing: 0.5px;
+}
+
+.category-list {
+  max-height: 200px;
   overflow-y: auto;
-  background: var(--bg-secondary);
 }
 
 .category-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
+  padding: 5px 10px;
   cursor: pointer;
   transition: all 0.2s;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .category-item:hover {
@@ -1330,114 +1899,108 @@ defineExpose({
 
 .category-item span {
   flex: 1;
-}
-
-.tag-filter {
-  flex-shrink: 0;
-  padding: 12px;
-  border-bottom: 1px solid var(--border-color);
-  max-height: 150px;
-  overflow-y: auto;
-  background: var(--bg-secondary);
-}
-
-.filter-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  margin-bottom: 8px;
-  letter-spacing: 0.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tag-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 3px;
+  padding: 0 10px;
+}
+
+/* 右侧主区域 */
+.snippet-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.snippet-search {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
 }
 
 .snippet-list {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 8px;
 }
 
 .snippet-item {
-  padding: 10px;
-  margin-bottom: 8px;
+  padding: 8px;
+  margin-bottom: 6px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s;
-  background: var(--bg-secondary);
+  background: var(--bg-main);
 }
 
 .snippet-item:hover {
-  background: var(--bg-main);
+  background: var(--bg-tertiary);
   border-color: var(--primary-color);
-  transform: translateY(-2px);
   box-shadow: var(--shadow-sm);
 }
 
 .snippet-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 6px;
+  align-items: center;
+  margin-bottom: 4px;
   gap: 8px;
 }
 
 .snippet-name {
   font-weight: 600;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12px;
   flex: 1;
-  line-height: 1.4;
-}
-
-.snippet-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .usage-count {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-tertiary);
+  flex-shrink: 0;
 }
 
 .snippet-command {
   font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 12px;
+  font-size: 11px;
   color: #2563eb;
-  background: var(--bg-tertiary);
-  padding: 6px 8px;
+  background: var(--bg-secondary);
+  padding: 4px 6px;
   border-radius: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-bottom: 6px;
-  border: 1px solid var(--border-medium);
-  font-weight: 500;
+  margin-bottom: 4px;
+  border: 1px solid var(--border-color);
 }
 
-/* 深色模式下的代码颜色 */
 :global(.dark) .snippet-command {
   color: #60a5fa;
 }
 
 .snippet-tags {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   flex-wrap: wrap;
 }
 
 .snippet-tags .tag {
-  background: var(--bg-main);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 10px;
+  background: var(--bg-secondary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
 }
@@ -1447,14 +2010,14 @@ defineExpose({
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 48px 32px;
+  padding: 32px 16px;
   text-align: center;
   color: var(--text-tertiary);
 }
 
 .empty-snippets p {
-  margin-top: 12px;
-  font-size: 14px;
+  margin-top: 8px;
+  font-size: 12px;
 }
 
 .command-preview {
@@ -1504,6 +2067,22 @@ defineExpose({
   justify-content: center;
   z-index: 9;
   box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+}
+
+/* 断线通知栏样式 */
+.disconnected-notification {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);
+}
+
+.disconnected-icon {
+  font-size: 16px;
 }
 
 .reconnect-content {

@@ -4,17 +4,35 @@ import { Client } from 'ssh2'
 /**
  * 服务器监控数据接口
  */
+// 进程信息详情
+export interface ProcessInfo {
+  pid: number
+  user: string
+  cpu: number
+  memory: number
+  command: string
+}
+
+// Docker 容器信息
+export interface DockerContainerInfo {
+  name: string
+  cpu: string
+  memory: string
+  netIO: string
+  status: string
+}
+
 export interface ServerMetrics {
   sessionId: string
   timestamp: string
-  
+
   // CPU 信息
   cpu: {
     usage: number // 使用率百分比
     loadAverage: number[] // 1分钟、5分钟、15分钟负载
     cores: number // CPU核心数
   }
-  
+
   // 内存信息
   memory: {
     total: number // 总内存（字节）
@@ -23,7 +41,7 @@ export interface ServerMetrics {
     available: number // 可用内存
     usage: number // 使用率百分比
   }
-  
+
   // 磁盘信息
   disk: {
     total: number // 总空间（字节）
@@ -31,23 +49,31 @@ export interface ServerMetrics {
     free: number // 空闲空间
     usage: number // 使用率百分比
   }
-  
+
   // 网络信息
   network: {
     bytesIn: number // 接收字节数
     bytesOut: number // 发送字节数
     packetsIn: number // 接收包数
     packetsOut: number // 发送包数
+    speedIn: number // 接收速率 (B/s)
+    speedOut: number // 发送速率 (B/s)
   }
-  
-  // 进程信息
+
+  // 进程概览
   processes: {
     total: number // 总进程数
     running: number // 运行中
     sleeping: number // 休眠中
     zombie: number // 僵尸进程
   }
-  
+
+  // Top 进程
+  topProcesses?: ProcessInfo[]
+
+  // Docker 容器
+  dockerContainers?: DockerContainerInfo[]
+
   // 系统信息
   system: {
     uptime: number // 运行时间（秒）
@@ -69,6 +95,8 @@ export interface MonitorConfig {
     disk: boolean
     network: boolean
     processes: boolean
+    topProcesses?: boolean
+    docker?: boolean
   }
 }
 
@@ -80,6 +108,7 @@ export class ServerMonitorManager extends EventEmitter {
   private sshClients: Map<string, Client>
   private configs: Map<string, MonitorConfig>
   private latestMetrics: Map<string, ServerMetrics>
+  private lastNetworkStats: Map<string, { bytesIn: number; bytesOut: number; timestamp: number }>
 
   constructor() {
     super()
@@ -87,6 +116,7 @@ export class ServerMonitorManager extends EventEmitter {
     this.sshClients = new Map()
     this.configs = new Map()
     this.latestMetrics = new Map()
+    this.lastNetworkStats = new Map()
   }
 
   /**
@@ -105,7 +135,9 @@ export class ServerMonitorManager extends EventEmitter {
         memory: config?.metrics?.memory !== false,
         disk: config?.metrics?.disk !== false,
         network: config?.metrics?.network !== false,
-        processes: config?.metrics?.processes !== false
+        processes: config?.metrics?.processes !== false,
+        topProcesses: config?.metrics?.topProcesses !== false, // 默认开启
+        docker: config?.metrics?.docker !== false // 默认开启
       }
     }
 
@@ -173,6 +205,14 @@ export class ServerMonitorManager extends EventEmitter {
         metrics.processes = await this.collectProcessMetrics(client)
       }
 
+      if (config.metrics.topProcesses) {
+        metrics.topProcesses = await this.collectTopProcesses(client)
+      }
+
+      if (config.metrics.docker) {
+        metrics.dockerContainers = await this.collectDockerMetrics(client)
+      }
+
       metrics.system = await this.collectSystemInfo(client)
 
       // 保存最新指标
@@ -191,17 +231,17 @@ export class ServerMonitorManager extends EventEmitter {
    */
   private async collectCPUMetrics(client: Client): Promise<ServerMetrics['cpu']> {
     // CPU 使用率
-    const cpuUsage = await this.executeCommand(client, 
+    const cpuUsage = await this.executeCommand(client,
       "top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'"
     )
 
     // 负载平均值
-    const loadAvg = await this.executeCommand(client, 
+    const loadAvg = await this.executeCommand(client,
       "cat /proc/loadavg | awk '{print $1,$2,$3}'"
     )
 
     // CPU 核心数
-    const cores = await this.executeCommand(client, 
+    const cores = await this.executeCommand(client,
       "nproc"
     )
 
@@ -218,7 +258,7 @@ export class ServerMonitorManager extends EventEmitter {
    * 收集内存指标
    */
   private async collectMemoryMetrics(client: Client): Promise<ServerMetrics['memory']> {
-    const memInfo = await this.executeCommand(client, 
+    const memInfo = await this.executeCommand(client,
       "free -b | grep Mem | awk '{print $2,$3,$4,$7}'"
     )
 
@@ -238,7 +278,7 @@ export class ServerMonitorManager extends EventEmitter {
    * 收集磁盘指标
    */
   private async collectDiskMetrics(client: Client): Promise<ServerMetrics['disk']> {
-    const diskInfo = await this.executeCommand(client, 
+    const diskInfo = await this.executeCommand(client,
       "df -B1 / | tail -1 | awk '{print $2,$3,$4}'"
     )
 
@@ -257,18 +297,52 @@ export class ServerMonitorManager extends EventEmitter {
    * 收集网络指标
    */
   private async collectNetworkMetrics(client: Client): Promise<ServerMetrics['network']> {
-    const netInfo = await this.executeCommand(client, 
+    // 获取 sessionId
+    let sessionId = ''
+    for (const [id, c] of this.sshClients.entries()) {
+      if (c === client) {
+        sessionId = id
+        break
+      }
+    }
+
+    const netInfo = await this.executeCommand(client,
       "cat /proc/net/dev | grep -E 'eth0|ens|enp' | head -1 | awk '{print $2,$3,$10,$11}'"
     )
 
     const values = netInfo.trim().split(' ').map(Number)
     const [bytesIn, packetsIn, bytesOut, packetsOut] = values
 
+    let speedIn = 0
+    let speedOut = 0
+
+    const now = Date.now()
+    const lastStat = this.lastNetworkStats.get(sessionId)
+
+    if (lastStat) {
+      const duration = (now - lastStat.timestamp) / 1000 // 秒
+      if (duration > 0) {
+        speedIn = Math.max(0, (bytesIn - lastStat.bytesIn) / duration)
+        speedOut = Math.max(0, (bytesOut - lastStat.bytesOut) / duration)
+      }
+    }
+
+    // 更新上一次状态
+    if (sessionId) {
+      this.lastNetworkStats.set(sessionId, {
+        bytesIn,
+        bytesOut,
+        timestamp: now
+      })
+    }
+
     return {
       bytesIn: bytesIn || 0,
       bytesOut: bytesOut || 0,
       packetsIn: packetsIn || 0,
-      packetsOut: packetsOut || 0
+      packetsOut: packetsOut || 0,
+      speedIn,
+      speedOut
     }
   }
 
@@ -276,7 +350,7 @@ export class ServerMonitorManager extends EventEmitter {
    * 收集进程指标
    */
   private async collectProcessMetrics(client: Client): Promise<ServerMetrics['processes']> {
-    const procInfo = await this.executeCommand(client, 
+    const procInfo = await this.executeCommand(client,
       "ps aux | awk 'NR>1 {print $8}' | sort | uniq -c | awk '{print $2,$1}'"
     )
 
@@ -303,19 +377,19 @@ export class ServerMonitorManager extends EventEmitter {
    * 收集系统信息
    */
   private async collectSystemInfo(client: Client): Promise<ServerMetrics['system']> {
-    const uptime = await this.executeCommand(client, 
+    const uptime = await this.executeCommand(client,
       "cat /proc/uptime | awk '{print $1}'"
     )
 
-    const hostname = await this.executeCommand(client, 
+    const hostname = await this.executeCommand(client,
       "hostname"
     )
 
-    const platform = await this.executeCommand(client, 
+    const platform = await this.executeCommand(client,
       "uname -s"
     )
 
-    const kernel = await this.executeCommand(client, 
+    const kernel = await this.executeCommand(client,
       "uname -r"
     )
 
@@ -402,11 +476,71 @@ export class ServerMonitorManager extends EventEmitter {
   }
 
   /**
-   * 清理所有监控
+   * 收集 Top 进程 (Top 5 by CPU)
    */
-  cleanup(): void {
-    for (const sessionId of this.monitors.keys()) {
-      this.stopMonitoring(sessionId)
+  private async collectTopProcesses(client: Client): Promise<ProcessInfo[]> {
+    try {
+      // PID, User, %CPU, %MEM, Command
+      // 注意：Command 需要处理空格，所以只取前一部分或者限制长度
+      const cmd = "ps -eo pid,user,%cpu,%mem,comm --sort=-%cpu | head -n 6 | tail -n 5 | awk '{print $1,$2,$3,$4,$5}'"
+      const result = await this.executeCommand(client, cmd)
+
+      return result.trim().split('\n')
+        .filter(line => line.trim())
+        .map(line => {
+          const [pid, user, cpu, mem, ...rest] = line.trim().split(/\s+/)
+          return {
+            pid: parseInt(pid),
+            user,
+            cpu: parseFloat(cpu),
+            memory: parseFloat(mem),
+            command: rest.join(' ') || 'unknown'
+          }
+        })
+    } catch (e) {
+      // 可能是命令不支持
+      return []
+    }
+  }
+
+  /**
+   * 收集 Docker 容器指标
+   */
+  private async collectDockerMetrics(client: Client): Promise<DockerContainerInfo[]> {
+    try {
+      // 检查 docker 是否存在
+      const checkCmd = 'which docker >/dev/null 2>&1 && echo "yes" || echo "no"'
+      const hasDocker = await this.executeCommand(client, checkCmd)
+
+      if (hasDocker.trim() !== 'yes') return []
+
+      // 获取容器统计信息
+      // Name, CPU%, Mem%, NetIO, Status
+      // 注意：docker stats 比较慢，可能需要优化，或者只获取运行中的容器
+      // 使用 --no-stream 获取一次性快照
+      const cmd = 'docker stats --no-stream --format "{{.Name}}|{{.CPUPerc}}|{{.MemPerc}}|{{.NetIO}}"' // |分隔避免空格解析问题
+      const statsResult = await this.executeCommand(client, cmd)
+
+      if (!statsResult.trim()) return []
+
+      // 获取状态信息（简单起见，这里假设 stats 只返回 running 的容器，或者我们混合 ps 命令）
+      // docker stats 默认只显示 running
+
+      return statsResult.trim().split('\n')
+        .filter(line => line.trim())
+        .map(line => {
+          const [name, cpu, mem, netIO] = line.split('|')
+          return {
+            name: name || 'unknown',
+            cpu: cpu || '0%',
+            memory: mem || '0%',
+            netIO: netIO || '0/0',
+            status: 'Running'
+          }
+        })
+        .slice(0, 5) // 限制显示前5个
+    } catch (e) {
+      return []
     }
   }
 }

@@ -474,12 +474,11 @@ const filteredConnectionStats = computed(() => {
   )
 })
 
-// 过滤后的命令统计
+// 过滤后的命令统计 - 命令统计不需要时间过滤，因为是聚合数据
 const filteredCommandStats = computed(() => {
-  const filter = getTimeRangeFilter()
-  return commandStats.value.filter(cmd => 
-    cmd.lastUsed && filter(cmd.lastUsed)
-  )
+  // 命令统计返回的是聚合后的 { command, count } 数据，没有时间字段
+  // 直接返回所有数据
+  return commandStats.value
 })
 
 // 直接从 store 计算统计数据

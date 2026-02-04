@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { sftpManager } from '../managers/SFTPManager'
 import { sshConnectionManager } from '../managers/SSHConnectionManager'
+import { auditLogManager, AuditAction } from '../managers/AuditLogManager'
 import { v4 as uuidv4 } from 'uuid'
 import { AppError } from '../utils/error-handler'
 
@@ -60,8 +61,24 @@ export function registerSFTPHandlers() {
       try {
         const taskId = uuidv4()
         await sftpManager.uploadFile(connectionId, localPath, remotePath, taskId)
+        
+        // 记录审计日志
+        auditLogManager.log(AuditAction.FILE_UPLOAD, {
+          sessionId: connectionId,
+          resource: remotePath,
+          details: { localPath, remotePath },
+          success: true
+        })
+        
         return { success: true, taskId }
       } catch (error: any) {
+        auditLogManager.log(AuditAction.FILE_UPLOAD, {
+          sessionId: connectionId,
+          resource: remotePath,
+          details: { localPath, remotePath },
+          success: false,
+          errorMessage: error.message
+        })
         return handleError(error)
       }
     }
@@ -74,8 +91,24 @@ export function registerSFTPHandlers() {
       try {
         const taskId = uuidv4()
         await sftpManager.downloadFile(connectionId, remotePath, localPath, taskId)
+        
+        // 记录审计日志
+        auditLogManager.log(AuditAction.FILE_DOWNLOAD, {
+          sessionId: connectionId,
+          resource: remotePath,
+          details: { localPath, remotePath },
+          success: true
+        })
+        
         return { success: true, taskId }
       } catch (error: any) {
+        auditLogManager.log(AuditAction.FILE_DOWNLOAD, {
+          sessionId: connectionId,
+          resource: remotePath,
+          details: { localPath, remotePath },
+          success: false,
+          errorMessage: error.message
+        })
         return handleError(error)
       }
     }
@@ -95,8 +128,22 @@ export function registerSFTPHandlers() {
   ipcMain.handle('sftp:deleteFile', async (_event, connectionId: string, path: string) => {
     try {
       await sftpManager.deleteFile(connectionId, path)
+      
+      // 记录审计日志
+      auditLogManager.log(AuditAction.FILE_DELETE, {
+        sessionId: connectionId,
+        resource: path,
+        success: true
+      })
+      
       return { success: true }
     } catch (error: any) {
+      auditLogManager.log(AuditAction.FILE_DELETE, {
+        sessionId: connectionId,
+        resource: path,
+        success: false,
+        errorMessage: error.message
+      })
       return handleError(error)
     }
   })
@@ -107,8 +154,24 @@ export function registerSFTPHandlers() {
     async (_event, connectionId: string, oldPath: string, newPath: string) => {
       try {
         await sftpManager.renameFile(connectionId, oldPath, newPath)
+        
+        // 记录审计日志
+        auditLogManager.log(AuditAction.FILE_RENAME, {
+          sessionId: connectionId,
+          resource: oldPath,
+          details: { oldPath, newPath },
+          success: true
+        })
+        
         return { success: true }
       } catch (error: any) {
+        auditLogManager.log(AuditAction.FILE_RENAME, {
+          sessionId: connectionId,
+          resource: oldPath,
+          details: { oldPath, newPath },
+          success: false,
+          errorMessage: error.message
+        })
         return handleError(error)
       }
     }

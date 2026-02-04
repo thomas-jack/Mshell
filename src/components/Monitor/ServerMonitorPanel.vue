@@ -71,33 +71,12 @@
         <div class="metric-info">{{ formatBytes(metrics.disk.free) }} 可用</div>
       </div>
 
-      <!-- 网络 -->
-      <div class="metric-card compact">
-        <div class="metric-header">
-          <span class="metric-title">网络</span>
-        </div>
-        <div class="network-compact">
-          <div class="network-row">
-            <span class="network-label">⬇️ 接收</span>
-            <span class="network-value">{{ formatBytes(metrics.network.bytesIn) }}</span>
-          </div>
-          <div class="network-row">
-            <span class="network-label">⬆️ 发送</span>
-            <span class="network-value">{{ formatBytes(metrics.network.bytesOut) }}</span>
-          </div>
-        </div>
-      </div>
-
       <!-- 系统信息 -->
       <div class="metric-card compact">
         <div class="metric-header">
           <span class="metric-title">系统</span>
         </div>
         <div class="system-info">
-          <div class="info-row">
-            <span class="info-label">主机</span>
-            <span class="info-value">{{ metrics.system.hostname }}</span>
-          </div>
           <div class="info-row">
             <span class="info-label">运行</span>
             <span class="info-value">{{ formatUptime(metrics.system.uptime) }}</span>
@@ -109,8 +88,77 @@
         </div>
       </div>
 
+      <!-- 网络 -->
+      <div class="metric-card compact full-width">
+        <div class="metric-header">
+          <span class="metric-title">网络</span>
+        </div>
+        <div class="network-compact">
+          <div class="network-row">
+            <span class="network-label">⬇️ 接收</span>
+            <div class="network-stats">
+              <span class="network-speed" v-if="metrics.network.speedIn !== undefined">{{ formatSpeed(metrics.network.speedIn) }}</span>
+              <span class="network-total">{{ formatBytes(metrics.network.bytesIn) }}</span>
+            </div>
+          </div>
+          <div class="network-row">
+            <span class="network-label">⬆️ 发送</span>
+             <div class="network-stats">
+              <span class="network-speed" v-if="metrics.network.speedOut !== undefined">{{ formatSpeed(metrics.network.speedOut) }}</span>
+              <span class="network-total">{{ formatBytes(metrics.network.bytesOut) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top 进程 -->
+      <div class="metric-card compact full-width" v-if="metrics.topProcesses && metrics.topProcesses.length > 0">
+        <div class="metric-header">
+          <span class="metric-title">Top 进程</span>
+        </div>
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th style="text-align: left;">进程</th>
+              <th style="text-align: right;">CPU</th>
+              <th style="text-align: right;">MEM</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="proc in metrics.topProcesses" :key="proc.pid">
+              <td class="truncate" :title="proc.command">{{ proc.command }}</td>
+              <td style="text-align: right;">{{ proc.cpu }}%</td>
+              <td style="text-align: right;">{{ proc.memory }}%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Docker 容器 -->
+      <div class="metric-card compact full-width" v-if="metrics.dockerContainers && metrics.dockerContainers.length > 0">
+        <div class="metric-header">
+          <span class="metric-title">Docker</span>
+        </div>
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th style="text-align: left;">容器</th>
+              <th style="text-align: right;">CPU</th>
+              <th style="text-align: right;">MEM</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="container in metrics.dockerContainers" :key="container.name">
+              <td class="truncate" :title="container.name">{{ container.name }}</td>
+              <td style="text-align: right;">{{ container.cpu }}</td>
+              <td style="text-align: right;">{{ container.memory }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <!-- 更新时间 -->
-      <div class="update-time">{{ formatTime(metrics.timestamp) }}</div>
+      <div class="update-time full-width">{{ formatTime(metrics.timestamp) }}</div>
     </div>
   </div>
 </template>
@@ -167,6 +215,11 @@ const formatBytes = (bytes: number): string => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+// 格式化速度
+const formatSpeed = (bytesPerSecond: number): string => {
+  return `${formatBytes(bytesPerSecond)}/s`
 }
 
 // 格式化运行时间
@@ -317,9 +370,15 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 12px;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
+  align-content: start;
+}
+
+.metric-card.full-width,
+.update-time.full-width {
+  grid-column: 1 / -1;
 }
 
 .metric-card.compact {
@@ -422,5 +481,47 @@ onUnmounted(() => {
   font-size: 10px;
   color: var(--text-tertiary);
   padding: 6px;
+}
+
+.compact-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  table-layout: fixed;
+}
+
+.compact-table th {
+  color: var(--text-secondary);
+  font-weight: normal;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.compact-table td {
+  color: var(--text-primary);
+  padding: 3px 0;
+}
+
+.network-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.network-speed {
+  color: var(--primary-color);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.network-total {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

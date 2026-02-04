@@ -46,6 +46,7 @@ const emit = defineEmits<{
   input: [input: string]
   cursorPosition: [position: { x: number; y: number }]
   'ai-request': [text: string]
+  'ssh-output': [output: string]
 }>()
 
 const aiStore = useAIStore()
@@ -88,14 +89,40 @@ onMounted(() => {
   fitAddon = instance.fitAddon
   searchAddon = instance.searchAddon
 
-  // 这里的事件监听是累加的，所以必须放在 handlersRegistered 检查内
+  // 每次组件挂载时，更新回调引用（解决闭包陷阱问题）
+  // 这样即使组件重新挂载，回调也会指向正确的 emit 函数
+  console.log(`[TerminalView] onMounted: Setting callbacks for ${props.connectionId}`)
+  terminalManager.setInputCallback(props.connectionId, (data: string, lineBuffer: string) => {
+    console.log(`[TerminalView] inputCallback called: lineBuffer="${lineBuffer}"`)
+    emit('input', lineBuffer)
+  })
+  
+  terminalManager.setCursorCallback(props.connectionId, (position: { x: number; y: number }) => {
+    emit('cursorPosition', position)
+  })
+  
+  terminalManager.setDataCallback(props.connectionId, (data: string) => {
+    emit('data', data)
+  })
+  
+  terminalManager.setOutputCallback(props.connectionId, (data: string) => {
+    emit('ssh-output', data)
+  })
+
   // 只在第一次创建时注册事件处理器
+  // 事件处理器内部通过回调引用调用，而不是直接捕获 emit
   if (!instance.handlersRegistered) {
     instance.handlersRegistered = true
     console.log(`[TerminalView] Registering event handlers for ${props.connectionId}`)
 
     // Handle terminal input
     terminal.onData((data) => {
+      // 获取终端实例
+      const inst = terminalManager.get(props.connectionId)
+      
+      // 调试日志：检查回调状态
+      console.log(`[TerminalView:onData] connectionId=${props.connectionId}, data="${data.replace(/[\r\n]/g, '\\n')}", inputCallback=${inst?.inputCallback ? 'SET' : 'NULL'}`)
+      
       // 更新当前行缓冲（用于自动补全）
       if (data === '\r' || data === '\n') {
         // 回车键 - 命令执行
@@ -119,33 +146,76 @@ onMounted(() => {
         // Ctrl+U - 清除整行
         currentCommand = ''
         currentLineBuffer = ''
-      } else if (data.charCodeAt(0) >= 32 && data.charCodeAt(0) < 127) {
-        // 可打印字符
-        currentCommand += data
-        currentLineBuffer += data
-      }
-      
-      // 发射输入事件（用于自动补全）
-      if (currentLineBuffer) {
-        emit('input', currentLineBuffer)
-        
-        // 发射光标位置（用于定位补全弹窗）
-        if (terminal && terminalContainer.value) {
-          const cursorX = terminal.buffer.active.cursorX
-          const cursorY = terminal.buffer.active.cursorY
-          const rect = terminalContainer.value.getBoundingClientRect()
-          
-          const charWidth = 9 
-          const lineHeight = 20
-          
-          emit('cursorPosition', {
-            x: rect.left + cursorX * charWidth,
-            y: rect.top + cursorY * lineHeight
-          })
+      } else if (data.charCodeAt(0) >= 32) {
+        // 可打印字符（包括中文等 Unicode 字符）
+        // 排除控制字符 (0-31) 和 DEL (127)
+        if (data.charCodeAt(0) !== 127) {
+          currentCommand += data
+          currentLineBuffer += data
         }
       }
       
-      emit('data', data)
+      // 通过回调引用发射输入事件（解决闭包陷阱）
+      console.log(`[TerminalView:onData] currentLineBuffer="${currentLineBuffer}", will call inputCallback: ${!!(currentLineBuffer && inst?.inputCallback)}`)
+      if (currentLineBuffer && inst?.inputCallback) {
+        inst.inputCallback(data, currentLineBuffer)
+        
+        // 发射光标位置（用于定位补全弹窗）
+        if (terminal && terminalContainer.value && inst.cursorCallback) {
+          try {
+            const rect = terminalContainer.value.getBoundingClientRect()
+            
+            // 确保容器有有效尺寸
+            if (rect.width <= 0 || rect.height <= 0) {
+              console.warn('[TerminalView] Container has invalid size, skipping cursor position update')
+              return
+            }
+            
+            // 获取终端的实际单元格尺寸
+            // xterm.js 内部使用 _core._renderService.dimensions
+            const core = (terminal as any)._core
+            let cellWidth = 9
+            let cellHeight = 20
+            
+            if (core?._renderService?.dimensions) {
+              const dims = core._renderService.dimensions
+              cellWidth = dims.css.cell.width || dims.actualCellWidth || cellWidth
+              cellHeight = dims.css.cell.height || dims.actualCellHeight || cellHeight
+            } else {
+              // 回退：使用字体大小估算
+              const fontSize = terminal.options.fontSize || 14
+              cellWidth = fontSize * 0.6
+              cellHeight = fontSize * 1.2
+            }
+            
+            // 获取光标位置
+            const cursorX = terminal.buffer.active.cursorX
+            const cursorY = terminal.buffer.active.cursorY
+            
+            // 计算光标在视口中的绝对位置
+            const padding = 4 // 终端内边距（xterm 默认较小）
+            
+            // 计算位置
+            const x = rect.left + padding + cursorX * cellWidth
+            const y = rect.top + padding + cursorY * cellHeight
+            
+            // 验证位置是否合理（在屏幕范围内）
+            if (x >= 0 && y >= 0 && x < window.innerWidth + 100 && y < window.innerHeight + 100) {
+              inst.cursorCallback({ x, y })
+            } else {
+              console.warn('[TerminalView] Cursor position out of bounds:', { x, y, cursorX, cursorY })
+            }
+          } catch (e) {
+            console.error('[TerminalView] Error calculating cursor position:', e)
+          }
+        }
+      }
+      
+      // 通过回调引用发射数据事件
+      if (inst?.dataCallback) {
+        inst.dataCallback(data)
+      }
+      
       window.electronAPI.ssh.write(props.connectionId, data)
       
       try {
@@ -297,6 +367,13 @@ onMounted(() => {
 onUnmounted(() => {
   console.log(`[TerminalView] Unmounting terminal view for ${props.connectionId}`)
   
+  // 清理回调引用
+  console.log(`[TerminalView] Clearing callbacks for ${props.connectionId}`)
+  terminalManager.setInputCallback(props.connectionId, null)
+  terminalManager.setCursorCallback(props.connectionId, null)
+  terminalManager.setDataCallback(props.connectionId, null)
+  terminalManager.setOutputCallback(props.connectionId, null)
+  
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
@@ -312,6 +389,12 @@ onUnmounted(() => {
 // 记录命令到历史
 const recordCommand = async (command: string) => {
   try {
+    // 过滤掉 # 开头的命令（AI 查询命令）
+    if (command.startsWith('#')) {
+      console.log('[TerminalView] Skipping AI query command:', command)
+      return
+    }
+    
     const duration = commandStartTime ? Date.now() - commandStartTime : undefined
     
     await window.electronAPI.commandHistory?.add?.({
@@ -367,7 +450,9 @@ const handleAIWrite = async (description: string) => {
     return
   }
 
-  emit('ai-request', `请根据以下描述编写代码。代码应遵循最佳实践，包含必要的注释，并处理可能的异常情况：\n\n需求描述：${description}`)
+  const template = aiStore.config.prompts?.write || `Write code based on this description: {content}\n\nLanguage: {language}\n\nReturn only the code without explanations or markdown code blocks.`
+  const prompt = template.replace('{content}', description).replace(/{language}/g, 'unknown')
+  emit('ai-request', prompt)
 }
 
 const handleAIExplain = async (code: string) => {
@@ -381,7 +466,9 @@ const handleAIExplain = async (code: string) => {
     return
   }
 
-  emit('ai-request', `请作为一名资深开发人员，详细分析并解释以下代码片段。请涵盖以下几点：\n1. 代码的主要功能和目的。\n2. 逐行或逐块解释关键逻辑。\n3. 指出可能存在的潜在错误、安全风险或边界情况。\n\n代码内容：\n${code}`)
+  const template = aiStore.config.prompts?.explain || `请作为一名资深开发人员，详细分析并解释以下代码片段的主要功能和目的。\n\n\`\`\`{language}\n{content}\n\`\`\``
+  const prompt = template.replace('{content}', code).replace(/{language}/g, 'unknown')
+  emit('ai-request', prompt)
 }
 
 const handleAIOptimize = async (code: string) => {
@@ -395,7 +482,9 @@ const handleAIOptimize = async (code: string) => {
     return
   }
 
-  emit('ai-request', `请作为一名资深开发人员，审查并优化以下代码片段。优化目标包括性能提升、可读性增强、安全性加固及遵循遵循最佳实践。请提供优化后的代码并说明改进点：\n\n原始代码：\n${code}`)
+  const template = aiStore.config.prompts?.optimize || `Optimize this code:\n\n\`\`\`{language}\n{content}\n\`\`\`\n\nReturn only the optimized code without explanations or markdown code blocks.`
+  const prompt = template.replace('{content}', code).replace(/{language}/g, 'unknown')
+  emit('ai-request', prompt)
 }
 
 // Watch for option changes

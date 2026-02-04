@@ -83,10 +83,25 @@ let currentRequestId = 0
 let debounceTimer: NodeJS.Timeout | null = null
 const DEBOUNCE_DELAY = 150
 
+// 组件实例 ID，用于防止多实例冲突
+const instanceId = ref(`autocomplete-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`)
+// 上一次处理的输入，用于防止重复处理
+let lastProcessedInput = ''
+
 // 计算弹窗位置，智能避免遮挡光标和溢出屏幕
 const popupStyle = computed(() => {
   const cursorX = props.cursorPosition.x
   const cursorY = props.cursorPosition.y
+  
+  // 如果光标位置无效（0,0 或负数），隐藏弹窗或使用默认位置
+  if (cursorX <= 0 && cursorY <= 0) {
+    // 返回一个屏幕外的位置，让弹窗不可见
+    return {
+      left: '-9999px',
+      top: '-9999px',
+      visibility: 'hidden'
+    }
+  }
   
   // 弹窗的预估尺寸
   const popupWidth = 380 // 预估宽度
@@ -175,14 +190,21 @@ const generateSuggestions = async () => {
   // 检查输入有效性
   const rawInput = props.input || ''
   
+  // 防止重复处理相同输入
+  if (rawInput === lastProcessedInput && suggestions.value.length > 0) {
+    return
+  }
+  
   if (!rawInput) {
     suggestions.value = []
+    lastProcessedInput = ''
     return
   }
   
   if (!props.visible) {
-      suggestions.value = []
-      return
+    suggestions.value = []
+    lastProcessedInput = ''
+    return
   }
 
   const words = rawInput.split(' ')
@@ -190,10 +212,12 @@ const generateSuggestions = async () => {
 
   if (words.length === 1 && !currentWord) {
     suggestions.value = []
+    lastProcessedInput = ''
     return
   }
 
-
+  // 记录当前处理的输入
+  lastProcessedInput = rawInput
   const requestId = ++currentRequestId
 
   // 0. Registry Based Completion (Unified System)
@@ -497,40 +521,72 @@ const getRemotePathSuggestions = async (dirPath: string, filePrefix: string, fol
 }
 
 // 监听输入变化（带防抖）
-watch(() => props.input, () => {
+watch(() => props.input, (newInput, oldInput) => {
   // 清除之前的定时器
   if (debounceTimer) {
     clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
+  
+  // 如果输入被清空或组件不可见，立即清空建议
+  if (!newInput || !props.visible) {
+    suggestions.value = []
+    selectedIndex.value = 0
+    hasUserSelected.value = false
+    lastProcessedInput = ''
+    return
   }
   
   // 对于快捷命令（/开头），立即显示，不防抖
-  if (props.input.trim().startsWith('/')) {
+  if (newInput.trim().startsWith('/')) {
+    lastProcessedInput = '' // 重置，允许重新生成
     generateSuggestions()
+    return
+  }
+  
+  // 如果输入没有实际变化且已有建议，不处理
+  if (newInput === oldInput && suggestions.value.length > 0) {
     return
   }
   
   // 其他情况使用防抖
   debounceTimer = setTimeout(() => {
-    generateSuggestions()
+    // 再次检查组件是否仍然可见，防止延迟执行时状态已变化
+    if (props.visible && props.input === newInput) {
+      lastProcessedInput = '' // 重置，允许重新生成
+      generateSuggestions()
+    }
   }, DEBOUNCE_DELAY)
 })
 
 // 监听可见性变化
 watch(() => props.visible, (newVal) => {
   if (newVal) {
-    // 使用 nextTick 确保 input 已经更新
-    nextTick(() => {
-      generateSuggestions()
-    })
+    // 打开时，只有当输入有效且与上次不同时才生成建议
+    // 避免与 input watch 的竞争
+    if (props.input && props.input !== lastProcessedInput) {
+      // 使用 nextTick 确保 input 已经更新
+      nextTick(() => {
+        // 再次检查，防止状态变化
+        if (props.visible && props.input) {
+          lastProcessedInput = '' // 重置，允许重新生成
+          generateSuggestions()
+        }
+      })
+    }
   } else {
+    // 关闭时立即清空所有状态，避免状态污染
     suggestions.value = []
     selectedIndex.value = 0
-    hasUserSelected.value = false // 重置用户选择状态
+    hasUserSelected.value = false
+    lastProcessedInput = ''
     // 清除防抖定时器
     if (debounceTimer) {
       clearTimeout(debounceTimer)
       debounceTimer = null
     }
+    // 取消正在进行的请求
+    currentRequestId++
   }
 })
 
@@ -545,6 +601,11 @@ onUnmounted(() => {
     clearTimeout(debounceTimer)
     debounceTimer = null
   }
+  // 取消所有待处理的请求
+  currentRequestId++
+  // 清空状态
+  suggestions.value = []
+  lastProcessedInput = ''
 })
 
 // 暴露方法供父组件调用
@@ -579,7 +640,21 @@ defineExpose({
     // 重置选择状态
     hasUserSelected.value = false
     selectedIndex.value = 0
-  }
+  },
+  // 新增：强制清空所有状态
+  forceReset: () => {
+    suggestions.value = []
+    selectedIndex.value = 0
+    hasUserSelected.value = false
+    lastProcessedInput = ''
+    if (debounceTimer) {
+      clearTimeout(debounceTimer)
+      debounceTimer = null
+    }
+    currentRequestId++
+  },
+  // 新增：获取实例 ID（用于调试）
+  getInstanceId: () => instanceId.value
 })
 </script>
 

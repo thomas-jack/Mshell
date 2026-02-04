@@ -165,13 +165,14 @@
             <el-form-item label="Temperature">
               <div class="slider-container">
                 <el-slider 
-                  v-model="config.temperature" 
+                  v-model="localConfig.temperature" 
                   :min="0" 
                   :max="2"
                   :step="0.1"
                   show-input
                   :input-size="'small'"
                   style="width: 300px"
+                  @change="markChanged"
                 />
                 <span class="form-hint">控制输出的随机性 (0.0 - 2.0)</span>
               </div>
@@ -179,11 +180,12 @@
             <el-form-item label="Max Tokens">
               <div class="slider-container">
                 <el-input-number 
-                  v-model="config.maxTokens" 
+                  v-model="localConfig.maxTokens" 
                   :min="100" 
                   :max="100000"
                   :step="100"
                   style="width: 200px"
+                  @change="markChanged"
                 />
                 <span class="form-hint">最大生成令牌数 (100 - 100000)</span>
               </div>
@@ -191,15 +193,17 @@
             <el-form-item label="请求超时">
               <div class="slider-container">
                 <el-input-number 
-                  v-model="config.timeout" 
+                  v-model="localConfig.timeout" 
                   :min="5000" 
                   :max="120000"
                   :step="5000"
                   style="width: 200px"
+                  @change="markChanged"
                 />
                 <span class="form-hint">毫秒 (5000 - 120000)</span>
               </div>
             </el-form-item>
+
           </el-form>
 
           <el-alert 
@@ -219,6 +223,55 @@
               </div>
             </template>
           </el-alert>
+        </div>
+      </el-tab-pane>
+
+      <!-- 提示词模板 -->
+      <el-tab-pane label="提示词设置" name="prompts">
+        <div class="settings-section">
+          <h3>自定义 AI 提示词</h3>
+          <el-alert 
+            type="info" 
+            :closable="false"
+            show-icon
+            style="margin-bottom: 20px"
+          >
+            <template #title>
+              您可以修改下方的模板来定制 AI 的行为。支持使用 {content} (代码内容) 和 {language} (编程语言) 作为变量。
+            </template>
+          </el-alert>
+
+          <el-form label-position="top" v-if="localConfig.prompts">
+            <el-form-item label="代码解释模板">
+              <el-input 
+                v-model="localConfig.prompts.explain" 
+                type="textarea" 
+                :rows="5"
+                placeholder="请输入模板..."
+                @input="markChanged"
+              />
+            </el-form-item>
+            
+            <el-form-item label="代码优化模板">
+              <el-input 
+                v-model="localConfig.prompts.optimize" 
+                type="textarea" 
+                :rows="5"
+                placeholder="请输入模板..."
+                @input="markChanged"
+              />
+            </el-form-item>
+
+            <el-form-item label="代码生成模板">
+              <el-input 
+                v-model="localConfig.prompts.write" 
+                type="textarea" 
+                :rows="5"
+                placeholder="请输入模板..."
+                @input="markChanged"
+              />
+            </el-form-item>
+          </el-form>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -246,7 +299,7 @@ import { Plus, Check } from '@element-plus/icons-vue'
 import { useAIStore } from '@/stores/ai'
 import AIChannelForm from './AIChannelForm.vue'
 import AIModelForm from './AIModelForm.vue'
-import type { AIChannel, AIModel } from '@/types/ai'
+import type { AIChannel, AIModel, AIConfig } from '@/types/ai'
 
 const aiStore = useAIStore()
 
@@ -258,6 +311,26 @@ const verifyingChannelId = ref<string | null>(null)
 const fetchingChannelId = ref<string | null>(null)
 const filterChannelId = ref('')
 
+// 本地配置状态（避免直接修改 store）
+const localConfig = ref<AIConfig>({
+  temperature: 0.7,
+  maxTokens: 4000,
+  timeout: 60000,
+  prompts: {
+    explain: '',
+    optimize: '',
+    write: ''
+  }
+})
+
+// 标记有更改（供父组件查询）
+const hasChanges = ref(false)
+
+// 标记有更改
+const markChanged = () => {
+  hasChanges.value = true
+}
+
 // 从 store 获取数据
 const channels = computed(() => aiStore.channels)
 const models = computed(() => aiStore.models)
@@ -266,13 +339,6 @@ const filteredModels = computed(() => {
     return models.value
   }
   return models.value.filter(m => m.channelId === filterChannelId.value)
-})
-
-const config = computed({
-  get: () => aiStore.config,
-  set: (value) => {
-    aiStore.config = value
-  }
 })
 
 onMounted(async () => {
@@ -286,10 +352,34 @@ const loadData = async () => {
       aiStore.loadModels(),
       aiStore.loadConfig()
     ])
+    // 加载完成后，复制 store 配置到本地状态
+    syncLocalConfig()
   } catch (error: any) {
     ElMessage.error(`加载数据失败: ${error.message}`)
   }
 }
+
+// 同步 store 配置到本地状态
+const syncLocalConfig = () => {
+  localConfig.value = JSON.parse(JSON.stringify(aiStore.config))
+  hasChanges.value = false
+}
+
+// 保存配置（供父组件调用）
+const saveConfig = async () => {
+  if (!hasChanges.value) return
+  await aiStore.updateConfig(localConfig.value)
+  hasChanges.value = false
+}
+
+// 获取是否有未保存的更改（供父组件查询）
+const getHasChanges = () => hasChanges.value
+
+// 暴露方法给父组件
+defineExpose({
+  saveConfig,
+  getHasChanges
+})
 
 // 渠道类型相关
 const getChannelTypeName = (type: string) => {

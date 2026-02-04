@@ -33,8 +33,9 @@
             <el-input-number v-model="config.autoLockTimeout" :min="1" :max="120" @change="saveConfig" />
             <span style="margin-left: 8px">分钟</span>
           </el-form-item>
-          <el-form-item label="最小化时锁定" v-if="config.hasPassword">
+          <el-form-item label="关闭到托盘时锁定" v-if="config.hasPassword">
             <el-switch v-model="config.lockOnMinimize" @change="saveConfig" />
+            <span style="margin-left: 8px; color: var(--text-secondary); font-size: 12px">点击关闭按钮隐藏到托盘时自动锁定</span>
           </el-form-item>
           <el-form-item label="休眠时锁定" v-if="config.hasPassword">
             <el-switch v-model="config.lockOnSuspend" @change="saveConfig" />

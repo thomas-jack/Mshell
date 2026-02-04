@@ -9,6 +9,9 @@ import { WebglAddon } from 'xterm-addon-webgl'
 import { SearchAddon } from 'xterm-addon-search'
 import { WebLinksAddon } from 'xterm-addon-web-links'
 
+// 输入回调类型
+export type InputCallback = (data: string, lineBuffer: string) => void
+
 interface TerminalInstance {
   terminal: Terminal
   fitAddon: FitAddon
@@ -19,6 +22,11 @@ interface TerminalInstance {
   connectionId: string
   handlersRegistered: boolean // 跟踪事件处理器是否已注册
   unsubscribers: Array<() => void> // 存储取消订阅函数，销毁时调用
+  // 可更新的回调引用 - 解决闭包陷阱问题
+  inputCallback: InputCallback | null
+  cursorCallback: ((position: { x: number; y: number }) => void) | null
+  dataCallback: ((data: string) => void) | null
+  outputCallback: ((data: string) => void) | null // SSH 输出回调（用于错误检测等）
 }
 
 class TerminalManager {
@@ -59,7 +67,7 @@ class TerminalManager {
       theme: options.theme,
       allowProposedApi: true,
       convertEol: true,
-      windowsMode: true,
+      windowsMode: typeof window !== 'undefined' && navigator.platform.indexOf('Win') > -1,
       altClickMovesCursor: true,
       rightClickSelectsWord: false,
       macOptionIsMeta: false,
@@ -163,8 +171,13 @@ class TerminalManager {
       webglAddon,
       container,
       connectionId,
-      handlersRegistered: false, // 改回 false，让 View 负责注册 UI 相关的事件
-      unsubscribers: []
+      handlersRegistered: false,
+      unsubscribers: [],
+      // 初始化可更新的回调引用
+      inputCallback: null,
+      cursorCallback: null,
+      dataCallback: null,
+      outputCallback: null
     }
 
     // 注册 SSH 事件监听器 (Data Layer)
@@ -172,13 +185,61 @@ class TerminalManager {
     console.log(`[TerminalManager] Registering persistent SSH event listeners for ${connectionId}`)
 
     // 1. SSH Data
-    const unsubData = window.electronAPI.ssh.onData((id: string, data: string) => {
+    const unsubData = window.electronAPI.ssh.onData((id: string, data: string | Uint8Array) => {
       if (id === connectionId) {
         instance.terminal.write(data)
         
+        // 调用输出回调（用于错误检测等）
+        if (instance.outputCallback) {
+          // 将数据转换为字符串
+          let strData: string
+          if (typeof data === 'string') {
+            strData = data
+          } else {
+            // 处理各种二进制数据类型（Uint8Array, ArrayBuffer, Buffer 等）
+            // 注意：Electron IPC 可能会改变数据类型，所以需要更健壮的检测
+            try {
+              // 尝试将数据转换为 Uint8Array 并解码
+              let uint8Data: Uint8Array
+              const anyData = data as any
+              
+              if (data instanceof Uint8Array) {
+                uint8Data = data
+              } else if (ArrayBuffer.isView(anyData)) {
+                uint8Data = new Uint8Array(anyData.buffer, anyData.byteOffset, anyData.byteLength)
+              } else if (anyData instanceof ArrayBuffer) {
+                uint8Data = new Uint8Array(anyData)
+              } else if (Array.isArray(anyData)) {
+                uint8Data = new Uint8Array(anyData)
+              } else if (typeof anyData === 'object' && anyData !== null) {
+                // 处理类数组对象（如 {0: 76, 1: 105, ...}）
+                const values = Object.values(anyData).filter(v => typeof v === 'number') as number[]
+                if (values.length > 0) {
+                  uint8Data = new Uint8Array(values)
+                } else {
+                  uint8Data = new Uint8Array(0)
+                }
+              } else {
+                uint8Data = new Uint8Array(0)
+              }
+              strData = new TextDecoder('utf-8').decode(uint8Data)
+            } catch (e) {
+              // 解码失败，使用空字符串
+              console.warn('[TerminalManager] Failed to decode SSH data:', e)
+              strData = ''
+            }
+          }
+          
+          // 只有非空数据才调用回调
+          if (strData) {
+            instance.outputCallback(strData)
+          }
+        }
+        
         // 更新流量统计（接收）
         try {
-          const bytesIn = new Blob([data]).size
+          const dataForBlob = typeof data === 'string' ? data : new Uint8Array(data as Uint8Array)
+          const bytesIn = new Blob([dataForBlob]).size
           const api = (window as any).electronAPI
           api.connectionStats?.updateTraffic?.(connectionId, bytesIn, 0)
         } catch (error) {
@@ -237,6 +298,99 @@ class TerminalManager {
    */
   get(connectionId: string): TerminalInstance | undefined {
     return this.instances.get(connectionId)
+  }
+
+  /**
+   * 设置输入回调 - 每次组件挂载时调用，更新回调引用
+   * 这样可以解决闭包陷阱问题
+   */
+  setInputCallback(connectionId: string, callback: InputCallback | null): void {
+    const instance = this.instances.get(connectionId)
+    if (instance) {
+      instance.inputCallback = callback
+    }
+  }
+
+  /**
+   * 设置光标位置回调
+   */
+  setCursorCallback(connectionId: string, callback: ((position: { x: number; y: number }) => void) | null): void {
+    const instance = this.instances.get(connectionId)
+    if (instance) {
+      instance.cursorCallback = callback
+    }
+  }
+
+  /**
+   * 设置数据回调（用于广播等功能）
+   */
+  setDataCallback(connectionId: string, callback: ((data: string) => void) | null): void {
+    const instance = this.instances.get(connectionId)
+    if (instance) {
+      instance.dataCallback = callback
+    }
+  }
+
+  /**
+   * 设置输出回调（用于错误检测等功能）
+   */
+  setOutputCallback(connectionId: string, callback: ((data: string) => void) | null): void {
+    const instance = this.instances.get(connectionId)
+    if (instance) {
+      console.log(`[TerminalManager] setOutputCallback for ${connectionId}, callback: ${callback ? 'set' : 'null'}`)
+      instance.outputCallback = callback
+    } else {
+      console.warn(`[TerminalManager] setOutputCallback: instance not found for ${connectionId}`)
+    }
+  }
+
+  /**
+   * 从终端 buffer 中解析当前工作目录
+   * 通过读取最后几行并匹配提示符格式来获取
+   */
+  getCurrentWorkingDirectory(connectionId: string): string | null {
+    const instance = this.instances.get(connectionId)
+    if (!instance || !instance.terminal) return null
+
+    const terminal = instance.terminal
+    const buffer = terminal.buffer.active
+
+    // 从最后一行往前搜索，找到包含提示符的行
+    const linesToCheck = 10
+    const currentLine = buffer.cursorY + buffer.viewportY
+
+    for (let i = currentLine; i >= Math.max(0, currentLine - linesToCheck); i--) {
+      const line = buffer.getLine(i)
+      if (!line) continue
+
+      const lineText = line.translateToString(true)
+      if (!lineText.trim()) continue
+
+      // 尝试匹配常见的提示符格式
+      // 格式1: user@host:path$ 或 user@host:path#
+      // 例如: root@VM-16-9-debian:~/Nextnotebook/scripts#
+      const match1 = lineText.match(/[\w-]+@[\w.-]+:([~\/][^\s$#]*)[#$]\s*$/)
+      if (match1 && match1[1]) {
+        console.log(`[TerminalManager] Detected cwd from prompt: ${match1[1]}`)
+        return match1[1].trim()
+      }
+
+      // 格式2: [user@host path]$ 
+      const match2 = lineText.match(/\[[\w-]+@[\w.-]+\s+([~\/][^\]]*)\][#$]\s*$/)
+      if (match2 && match2[1]) {
+        console.log(`[TerminalManager] Detected cwd from prompt: ${match2[1]}`)
+        return match2[1].trim()
+      }
+
+      // 格式3: path$ 或 path# (简化的提示符)
+      const match3 = lineText.match(/^([~\/][\w\/.-]*)[#$%>]\s*$/)
+      if (match3 && match3[1]) {
+        console.log(`[TerminalManager] Detected cwd from prompt: ${match3[1]}`)
+        return match3[1].trim()
+      }
+    }
+
+    return null
   }
 
   /**

@@ -3,6 +3,32 @@ import { promises as fs } from 'fs'
 import { sshConnectionManager, SSHConnectionOptions } from '../managers/SSHConnectionManager'
 import { logger } from '../utils/logger'
 import { knownHostsManager } from '../utils/known-hosts'
+import { auditLogManager, AuditAction } from '../managers/AuditLogManager'
+import type { ProxyJumpConfig } from '../../src/types/session'
+
+/**
+ * 递归处理跳板机配置中的私钥路径
+ */
+async function processProxyJumpPrivateKeys(config: ProxyJumpConfig): Promise<ProxyJumpConfig> {
+  const processed = { ...config }
+  
+  // 如果使用私钥认证且提供了路径，读取私钥内容
+  if (processed.authType === 'privateKey' && processed.privateKeyPath && !processed.privateKey) {
+    try {
+      const keyBuffer = await fs.readFile(processed.privateKeyPath)
+      processed.privateKey = keyBuffer.toString()
+    } catch (error: any) {
+      throw new Error(`无法读取跳板机私钥文件 ${processed.privateKeyPath}: ${error.message}`)
+    }
+  }
+  
+  // 递归处理下一级跳板机
+  if (processed.nextJump) {
+    processed.nextJump = await processProxyJumpPrivateKeys(processed.nextJump)
+  }
+  
+  return processed
+}
 
 /**
  * 注册 SSH IPC 处理器
@@ -22,6 +48,17 @@ export function registerSSHHandlers() {
         }
       }
 
+      // 处理跳板机配置中的私钥
+      let processedProxyJump = options.proxyJump
+      if (processedProxyJump && processedProxyJump.enabled) {
+        try {
+          processedProxyJump = await processProxyJumpPrivateKeys(processedProxyJump)
+        } catch (error: any) {
+          logger.logError('connection', `Failed to process proxy jump config`, error)
+          return { success: false, error: error.message }
+        }
+      }
+
       // 构建连接选项
       const connectOptions: SSHConnectionOptions = {
         host: options.host,
@@ -33,15 +70,36 @@ export function registerSSHHandlers() {
         keepaliveInterval: options.keepaliveInterval,
         keepaliveCountMax: options.keepaliveCountMax,
         readyTimeout: options.readyTimeout,
-        sessionName: options.sessionName
+        sessionName: options.sessionName,
+        proxyJump: processedProxyJump,
+        proxy: options.proxy
       }
 
       await sshConnectionManager.connect(id, connectOptions)
       logger.logConnection(id, options.sessionName || 'Unknown', options.host, options.username, 'connect')
+      
+      // 记录审计日志
+      auditLogManager.log(AuditAction.SESSION_CONNECT, {
+        sessionId: id,
+        resource: `${options.username}@${options.host}:${options.port}`,
+        details: { sessionName: options.sessionName, host: options.host, port: options.port, username: options.username },
+        success: true
+      })
+      
       return { success: true }
     } catch (error: any) {
       logger.logConnection(id, options.sessionName || 'Unknown', options.host, options.username, 'connect', error.message)
       logger.logError('connection', `Failed to connect to ${options.username}@${options.host}`, error)
+      
+      // 记录失败的审计日志
+      auditLogManager.log(AuditAction.SESSION_CONNECT, {
+        sessionId: id,
+        resource: `${options.username}@${options.host}:${options.port}`,
+        details: { sessionName: options.sessionName, host: options.host, port: options.port, username: options.username },
+        success: false,
+        errorMessage: error.message
+      })
+      
       return { success: false, error: error.message }
     }
   })
@@ -53,6 +111,14 @@ export function registerSSHHandlers() {
       await sshConnectionManager.disconnect(id)
       if (connection) {
         logger.logConnection(id, 'Session', connection.options.host, connection.options.username, 'disconnect')
+        
+        // 记录审计日志
+        auditLogManager.log(AuditAction.SESSION_DISCONNECT, {
+          sessionId: id,
+          resource: `${connection.options.username}@${connection.options.host}:${connection.options.port}`,
+          details: { host: connection.options.host, port: connection.options.port, username: connection.options.username },
+          success: true
+        })
       }
       return { success: true }
     } catch (error: any) {
@@ -87,6 +153,17 @@ export function registerSSHHandlers() {
       return { success: true, data: output }
     } catch (error: any) {
       logger.logError('connection', `Failed to execute command on session ${id}: ${command}`, error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 获取终端当前工作目录
+  ipcMain.handle('ssh:getCurrentDirectory', async (_event, id: string) => {
+    try {
+      const dir = await sshConnectionManager.getCurrentDirectory(id)
+      return { success: true, data: dir }
+    } catch (error: any) {
+      logger.logError('connection', `Failed to get current directory for session ${id}`, error)
       return { success: false, error: error.message }
     }
   })

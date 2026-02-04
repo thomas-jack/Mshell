@@ -77,7 +77,12 @@ class AppSettingsManager {
       ssh: {
         timeout: 30,
         keepalive: true,
-        keepaliveInterval: 60
+        keepaliveInterval: 60,
+        commandAutocomplete: true,
+        aiCommandSuggest: true,
+        riskWarning: true,
+        commandCorrection: true,
+        commandExplain: true
       },
       security: {
         savePasswords: true,
@@ -103,10 +108,10 @@ class AppSettingsManager {
     }
   }
 
-  private save(): void {
+  private async save(): Promise<void> {
     try {
       const data = JSON.stringify(this.settings, null, 2)
-      fs.writeFileSync(this.settingsFile, data)
+      await fs.promises.writeFile(this.settingsFile, data)
     } catch (error) {
       console.error('Failed to save settings:', error)
     }
@@ -116,7 +121,7 @@ class AppSettingsManager {
     return { ...this.settings }
   }
 
-  updateSettings(updates: Partial<AppSettings>): void {
+  async updateSettings(updates: Partial<AppSettings>): Promise<void> {
     this.settings = {
       ...this.settings,
       ...updates,
@@ -127,12 +132,12 @@ class AppSettingsManager {
       security: { ...this.settings.security, ...updates.security },
       updates: { ...this.settings.updates, ...updates.updates }
     }
-    this.save()
+    await this.save()
   }
 
-  resetToDefaults(): void {
+  async resetToDefaults(): Promise<void> {
     this.settings = this.getDefaultSettings()
-    this.save()
+    await this.save()
   }
 }
 

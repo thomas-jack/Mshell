@@ -74,8 +74,8 @@ export function registerSessionLockHandlers() {
   // Lock session
   ipcMain.handle('sessionLock:lock', async () => {
     try {
-      sessionLockManager.lock()
-      return { success: true }
+      const result = sessionLockManager.lock()
+      return result
     } catch (error) {
       console.error('Failed to lock session:', error)
       return { success: false, error: (error as Error).message }

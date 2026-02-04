@@ -680,6 +680,26 @@ export class BackupManager {
         logger.logInfo('system', 'No AI chat history found in backup (old version backup)')
       }
 
+      // 恢复终端 AI 聊天历史
+      if (options.restoreAIChatHistory && backupData.aiTerminalChatHistory) {
+        try {
+          const historyDir = join(app.getPath('userData'), 'ai-terminal-history')
+          // 确保目录存在
+          await fs.mkdir(historyDir, { recursive: true })
+          
+          // 恢复每个终端的聊天历史文件
+          for (const [filename, messages] of Object.entries(backupData.aiTerminalChatHistory)) {
+            const filePath = join(historyDir, filename)
+            await fs.writeFile(filePath, JSON.stringify(messages, null, 2), 'utf-8')
+          }
+          
+          const fileCount = Object.keys(backupData.aiTerminalChatHistory).length
+          logger.logInfo('system', `AI terminal chat history restored successfully (${fileCount} files)`)
+        } catch (error) {
+          logger.logError('system', 'Failed to restore AI terminal chat history', error as Error)
+        }
+      }
+
       try {
         logger.logInfo('system', 'Backup applied successfully')
       } catch (error) {

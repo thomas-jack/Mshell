@@ -26,7 +26,12 @@ export const useAIStore = defineStore('ai', {
     config: {
       temperature: 0.7,
       maxTokens: 4000,
-      timeout: 60000
+      timeout: 60000,
+      prompts: {
+        explain: '',
+        optimize: '',
+        write: ''
+      }
     },
     loading: false,
     error: null,
@@ -367,6 +372,26 @@ export const useAIStore = defineStore('ai', {
     },
 
     /**
+     * 使用指定模型发送 AI 请求
+     */
+    async sendRequestWithModel(action: AIAction, content: string, modelId: string, language?: string): Promise<string> {
+      this.error = null
+      try {
+        const result = await window.electronAPI.ai?.requestWithModel(action, content, modelId, language)
+        if (result?.success && result.data) {
+          return result.data
+        } else {
+          this.error = result?.error || 'AI 请求失败'
+          throw new Error(this.error || undefined)
+        }
+      } catch (error: any) {
+        this.error = error.message || 'AI 请求失败'
+        console.error('Failed to send AI request with model:', error)
+        throw error
+      }
+    },
+
+    /**
      * 更新配置
      */
     async updateConfig(updates: Partial<AIConfig>) {
@@ -449,34 +474,52 @@ export const useAIStore = defineStore('ai', {
       this.messages.push(userMsg)
       await this.saveChatHistory()
 
+      // AI 回复消息索引
+      let aiMsgIndex = -1
+      let cleanupStream: (() => void) | undefined
+
       try {
-        // 调用 AI 接口 (这里的 request action 复用，虽然它目前设计的是单次任务)
-        // 注意：目前的 request 方法不支持上下文对话 (`messages` array)，只支持 single text prompt。
-        // 为了支持上下文，我们需要修改 request 接口或者在这里拼接 prompt。
-        // 暂时简单拼接上下文：
-
-        // 调用接口
-        const responseContent = await this.sendRequest('chat', content)
-        // 或者是 'write', 'optimize'。其实 action 只是影响 System Prompt。
-        // 对于通用聊天，我们可以加一个 'chat' action 或者复用 'explain' (它通常比较通用)。
-        // 既然要做通用聊天，最好加一个 'chat' action 到后端。
-        // 但现在后端只支持 write/explain/optimize。
-        // 暂时用 'explain'，因为它通常返回解释性文本。
-
-        // 添加 AI 回复
-        const aiMsg: AIChatMessage = {
-          id: uuidv4(),
-          role: 'assistant',
-          content: responseContent,
-          timestamp: Date.now(),
-          modelId: this.config.defaultModelId,
-          status: 'success'
+        // 监听流式输出
+        if (window.electronAPI.ai?.onStreamChunk) {
+          cleanupStream = window.electronAPI.ai.onStreamChunk((_requestId, chunk) => {
+            // 收到第一个 chunk 时才添加 AI 消息
+            if (aiMsgIndex === -1) {
+              const aiMsg: AIChatMessage = {
+                id: uuidv4(),
+                role: 'assistant',
+                content: chunk,
+                timestamp: Date.now(),
+                modelId: this.config.defaultModelId,
+                status: 'success'
+              }
+              this.messages.push(aiMsg)
+              aiMsgIndex = this.messages.length - 1
+              this.chatLoading = false // 隐藏加载指示器
+            } else {
+              // 通过索引直接修改数组元素，确保 Vue 能检测到变化
+              this.messages[aiMsgIndex].content += chunk
+            }
+          })
         }
-        this.messages.push(aiMsg)
+
+        // 调用 AI 接口
+        const responseContent = await this.sendRequest('chat', content)
+        
+        // 非流式模式：直接使用完整响应
+        if (aiMsgIndex === -1) {
+          const aiMsg: AIChatMessage = {
+            id: uuidv4(),
+            role: 'assistant',
+            content: responseContent,
+            timestamp: Date.now(),
+            modelId: this.config.defaultModelId,
+            status: 'success'
+          }
+          this.messages.push(aiMsg)
+        }
 
       } catch (error: any) {
-        // 添加错误消息或标记上一条消息失败？
-        // 这里添加一个系统/错误消息，或者直接把错误显示在 UI 上
+        // 添加错误消息
         const errorMsg: AIChatMessage = {
           id: uuidv4(),
           role: 'assistant',
@@ -488,6 +531,7 @@ export const useAIStore = defineStore('ai', {
         this.messages.push(errorMsg)
         throw error
       } finally {
+        cleanupStream?.()
         this.chatLoading = false
         await this.saveChatHistory()
       }

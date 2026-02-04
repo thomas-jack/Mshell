@@ -23,7 +23,7 @@ import { AnthropicAdapter } from './ai-providers/AnthropicAdapter'
 import { GeminiAdapter } from './ai-providers/GeminiAdapter'
 import { OpenAICompatibleAdapter } from './ai-providers/OpenAICompatibleAdapter'
 import { languageDetector } from '../utils/language-detector'
-import { buildPrompt, removeCodeBlockMarkers } from '../utils/prompt-templates'
+import { buildPrompt, removeCodeBlockMarkers, PROMPT_TEMPLATES } from '../utils/prompt-templates'
 import { logger } from '../utils/logger'
 
 /**
@@ -55,7 +55,12 @@ export class AIManager {
     this.config = {
       temperature: 0.7,
       maxTokens: 2000,
-      timeout: 30000
+      timeout: 30000,
+      prompts: {
+        explain: PROMPT_TEMPLATES.explain.template,
+        optimize: PROMPT_TEMPLATES.optimize.template,
+        write: PROMPT_TEMPLATES.write.template
+      }
     }
 
     // 初始化 Provider Adapters
@@ -417,15 +422,34 @@ export class AIManager {
       }
 
       // 发送请求
-      let response = await adapter.sendRequest({
-        apiKey: channel.apiKey,
-        endpoint: channel.apiEndpoint,
-        modelId: defaultModel.modelId,
-        prompt,
-        temperature: this.config.temperature,
-        maxTokens: this.config.maxTokens,
-        timeout: this.config.timeout
-      })
+      let response = ''
+
+      if (adapter.streamRequest) {
+        // 使用流式请求
+        response = await adapter.streamRequest({
+          apiKey: channel.apiKey,
+          endpoint: channel.apiEndpoint,
+          modelId: defaultModel.modelId,
+          prompt,
+          temperature: this.config.temperature,
+          maxTokens: this.config.maxTokens,
+          timeout: this.config.timeout
+        }, (chunk) => {
+          // 发送数据块
+          this.sendEvent('ai:stream-chunk', requestId, chunk)
+        })
+      } else {
+        // 降级为普通请求
+        response = await adapter.sendRequest({
+          apiKey: channel.apiKey,
+          endpoint: channel.apiEndpoint,
+          modelId: defaultModel.modelId,
+          prompt,
+          temperature: this.config.temperature,
+          maxTokens: this.config.maxTokens,
+          timeout: this.config.timeout
+        })
+      }
 
       // 对于撰写和优化操作，移除代码块标记
       if (action === 'write' || action === 'optimize') {
@@ -458,6 +482,137 @@ export class AIManager {
       this.sendEvent('ai:error', requestId, error.message)
 
       logger.logError('system', 'AI request failed', error)
+      throw error
+    }
+  }
+
+  /**
+   * 使用指定模型发送 AI 请求
+   */
+  async requestWithModel(action: AIAction, content: string, modelId: string, language?: string): Promise<string> {
+    const requestId = uuidv4()
+
+    try {
+      // 查找指定模型
+      const model = this.models.get(modelId)
+      if (!model) {
+        throw new Error('指定的模型不存在')
+      }
+
+      // 检查渠道
+      const channel = this.channels.get(model.channelId)
+      if (!channel) {
+        throw new Error('模型所属渠道不存在')
+      }
+
+      if (!channel.enabled) {
+        throw new Error('AI 渠道已禁用，请在设置中启用')
+      }
+
+      // 检查内容长度
+      if (content.length > 10000) {
+        throw new Error('内容过长，请减少选中的文本')
+      }
+
+      // 检测语言（如果未提供）
+      if (!language) {
+        const detection = languageDetector.detect(content)
+        language = detection.language
+      }
+
+      // 检查缓存
+      const cacheKey = this.getCacheKey(action, content, model.id)
+      const cached = this.getFromCache(cacheKey)
+      if (cached) {
+        logger.logInfo('system', `AI request served from cache: ${requestId}`)
+        return cached
+      }
+
+      // 构建提示词
+      const prompt = buildPrompt(action, content, language)
+
+      // 创建请求记录
+      const request: AIRequest = {
+        id: requestId,
+        action,
+        content,
+        language,
+        modelId: model.id,
+        status: 'processing',
+        createdAt: new Date()
+      }
+      this.requests.set(requestId, request)
+
+      // 发送进度事件
+      this.sendEvent('ai:progress', requestId, 0)
+
+      // 获取 adapter
+      const adapter = this.adapters.get(channel.type)
+      if (!adapter) {
+        throw new Error('不支持的渠道类型')
+      }
+
+      // 发送请求
+      let response = ''
+
+      if (adapter.streamRequest) {
+        // 使用流式请求
+        response = await adapter.streamRequest({
+          apiKey: channel.apiKey,
+          endpoint: channel.apiEndpoint,
+          modelId: model.modelId,
+          prompt,
+          temperature: this.config.temperature,
+          maxTokens: this.config.maxTokens,
+          timeout: this.config.timeout
+        }, (chunk) => {
+          // 发送数据块
+          this.sendEvent('ai:stream-chunk', requestId, chunk)
+        })
+      } else {
+        // 降级为普通请求
+        response = await adapter.sendRequest({
+          apiKey: channel.apiKey,
+          endpoint: channel.apiEndpoint,
+          modelId: model.modelId,
+          prompt,
+          temperature: this.config.temperature,
+          maxTokens: this.config.maxTokens,
+          timeout: this.config.timeout
+        })
+      }
+
+      // 对于撰写和优化操作，移除代码块标记
+      if (action === 'write' || action === 'optimize') {
+        response = removeCodeBlockMarkers(response)
+      }
+
+      // 更新请求记录
+      request.status = 'completed'
+      request.response = response
+      request.completedAt = new Date()
+
+      // 保存到缓存
+      this.saveToCache(cacheKey, response)
+
+      // 发送完成事件
+      this.sendEvent('ai:complete', requestId, response)
+
+      logger.logInfo('system', `AI request with model completed: ${requestId}`)
+      return response
+    } catch (error: any) {
+      // 更新请求记录
+      const request = this.requests.get(requestId)
+      if (request) {
+        request.status = 'failed'
+        request.error = error.message
+        request.completedAt = new Date()
+      }
+
+      // 发送错误事件
+      this.sendEvent('ai:error', requestId, error.message)
+
+      logger.logError('system', 'AI request with model failed', error)
       throw error
     }
   }
@@ -547,6 +702,70 @@ export class AIManager {
    */
   getConfig(): AIConfig {
     return { ...this.config }
+  }
+
+  /**
+   * 批量更新所有配置
+   */
+  async updateAll(data: { channels: AIChannel[], models: AIModel[], config: AIConfig, defaultModelId?: string }): Promise<void> {
+    try {
+      // 1. 更新 Config
+      if (data.config) {
+        // Merge loaded config with defaults to ensure all fields exist
+        this.config = {
+          ...this.config,
+          ...data.config,
+          prompts: {
+            ...this.config.prompts,
+            ...(data.config.prompts || {})
+          }
+        }
+      }
+      if (data.defaultModelId !== undefined) {
+        this.config.defaultModelId = data.defaultModelId
+      }
+
+      // 2. 更新 Channels
+      // 注意：这里是全量替换，所以前端必须传递完整的列表
+      if (data.channels) {
+        const newChannelsMap = new Map<string, AIChannel>()
+        for (const ch of data.channels) {
+          // 保持后端生成的字段如果前端丢失了（虽不应该发生）
+          const existing = this.channels.get(ch.id)
+          const channel: AIChannel = {
+            ...ch,
+            createdAt: existing?.createdAt ? new Date(existing.createdAt) : (ch.createdAt ? new Date(ch.createdAt) : new Date()),
+            updatedAt: new Date()
+          }
+          newChannelsMap.set(channel.id, channel)
+        }
+        this.channels = newChannelsMap
+      }
+
+      // 3. 更新 Models
+      if (data.models) {
+        const newModelsMap = new Map<string, AIModel>()
+        for (const m of data.models) {
+          const existing = this.models.get(m.id)
+          const model: AIModel = {
+            ...m,
+            createdAt: existing?.createdAt ? new Date(existing.createdAt) : (m.createdAt ? new Date(m.createdAt) : new Date())
+          }
+          newModelsMap.set(model.id, model)
+        }
+        this.models = newModelsMap
+      }
+
+      await this.saveConfig()
+      logger.logInfo('system', 'AI full config updated via updateAll')
+
+      // 通知前端更新（虽然是前端发起的，但为了保持一致性）
+      this.sendEvent('ai:config-updated')
+
+    } catch (error) {
+      logger.logError('system', 'Failed to update all AI config', error as Error)
+      throw error
+    }
   }
 
   // ==================== 缓存管理 ====================
@@ -646,7 +865,15 @@ export class AIManager {
 
       // 加载配置
       if (config.config) {
-        this.config = config.config
+        // 深度合并配置，保留默认的 prompts
+        this.config = {
+          ...this.config,
+          ...config.config,
+          prompts: {
+            ...this.config.prompts,
+            ...(config.config.prompts || {})
+          }
+        }
       }
 
       // 加载默认模型

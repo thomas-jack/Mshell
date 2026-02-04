@@ -27,6 +27,23 @@
     "publisherName": "MShell Team",
     "verifyUpdateCodeSignature": false
   },
+  "linux": {
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": ["x64"]
+      },
+      {
+        "target": "deb",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "build/icon.png",
+    "category": "Network",
+    "maintainer": "MShell Team",
+    "synopsis": "Professional SSH Client",
+    "description": "MShell - A modern SSH client with AI-powered features"
+  },
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,

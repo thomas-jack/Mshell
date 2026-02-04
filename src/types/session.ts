@@ -15,6 +15,8 @@ export interface SessionConfig {
   sortOrder?: number // 用于拖拽排序
   // Proxy Jump (跳板机) Configuration
   proxyJump?: ProxyJumpConfig
+  // Proxy (代理) Configuration
+  proxy?: ProxyConfig
   // Server Management Info
   description?: string
   provider?: string
@@ -42,6 +44,15 @@ export interface ProxyJumpConfig {
   passphrase?: string
   // 支持多级跳板
   nextJump?: ProxyJumpConfig
+}
+
+export interface ProxyConfig {
+  enabled: boolean
+  type: 'socks5' | 'http'
+  host: string
+  port: number
+  username?: string
+  password?: string
 }
 
 export interface SessionGroup {

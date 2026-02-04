@@ -1,5 +1,6 @@
 import { ipcMain, dialog } from 'electron'
 import { sshKeyManager } from '../managers/SSHKeyManager'
+import { auditLogManager, AuditAction } from '../managers/AuditLogManager'
 
 /**
  * Register SSH key IPC handlers
@@ -34,9 +35,22 @@ export function registerSSHKeyHandlers() {
   ipcMain.handle('sshKey:generate', async (_event, options: any) => {
     try {
       const key = sshKeyManager.generateKeyPair(options)
+      
+      // 记录审计日志
+      auditLogManager.log(AuditAction.KEY_GENERATE, {
+        resource: options.name || key.name,
+        details: { keyType: options.type, keySize: options.bits, name: options.name },
+        success: true
+      })
+      
       return { success: true, data: key }
     } catch (error) {
       console.error('Failed to generate SSH key:', error)
+      auditLogManager.log(AuditAction.KEY_GENERATE, {
+        resource: options.name,
+        success: false,
+        errorMessage: (error as Error).message
+      })
       return { success: false, error: (error as Error).message }
     }
   })
@@ -56,9 +70,23 @@ export function registerSSHKeyHandlers() {
   ipcMain.handle('sshKey:import', async (_event, name: string, privateKeyPath: string, passphrase?: string) => {
     try {
       const key = sshKeyManager.importKey(name, privateKeyPath, passphrase)
+      
+      // 记录审计日志
+      auditLogManager.log(AuditAction.KEY_IMPORT, {
+        resource: name,
+        details: { name, privateKeyPath },
+        success: true
+      })
+      
       return { success: true, data: key }
     } catch (error) {
       console.error('Failed to import SSH key:', error)
+      auditLogManager.log(AuditAction.KEY_IMPORT, {
+        resource: name,
+        details: { privateKeyPath },
+        success: false,
+        errorMessage: (error as Error).message
+      })
       return { success: false, error: (error as Error).message }
     }
   })
@@ -66,10 +94,25 @@ export function registerSSHKeyHandlers() {
   // Export key
   ipcMain.handle('sshKey:export', async (_event, id: string, exportPath: string) => {
     try {
+      const key = sshKeyManager.getKey(id)
       sshKeyManager.exportKey(id, exportPath)
+      
+      // 记录审计日志
+      auditLogManager.log(AuditAction.KEY_EXPORT, {
+        resource: key?.name || id,
+        details: { keyId: id, exportPath },
+        success: true
+      })
+      
       return { success: true }
     } catch (error) {
       console.error('Failed to export SSH key:', error)
+      auditLogManager.log(AuditAction.KEY_EXPORT, {
+        resource: id,
+        details: { exportPath },
+        success: false,
+        errorMessage: (error as Error).message
+      })
       return { success: false, error: (error as Error).message }
     }
   })
@@ -88,10 +131,24 @@ export function registerSSHKeyHandlers() {
   // Delete key
   ipcMain.handle('sshKey:delete', async (_event, id: string) => {
     try {
+      const key = sshKeyManager.getKey(id)
       sshKeyManager.deleteKey(id)
+      
+      // 记录审计日志
+      auditLogManager.log(AuditAction.KEY_DELETE, {
+        resource: key?.name || id,
+        details: { keyId: id, keyName: key?.name },
+        success: true
+      })
+      
       return { success: true }
     } catch (error) {
       console.error('Failed to delete SSH key:', error)
+      auditLogManager.log(AuditAction.KEY_DELETE, {
+        resource: id,
+        success: false,
+        errorMessage: (error as Error).message
+      })
       return { success: false, error: (error as Error).message }
     }
   })
